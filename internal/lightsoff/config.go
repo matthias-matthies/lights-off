@@ -82,10 +82,6 @@ func (c config) declaresSecret(variable string) bool {
 	return false
 }
 
-func configLinesFor(repo string) string {
-	return fmt.Sprintf("[repos.%q]\nallowlist = [\"<your-github-username>\"]\n", repo)
-}
-
 // parseConfig returns the config, or an error and its 1-based line number.
 func parseConfig(text string) (config, int, error) {
 	cfg := config{repos: map[string]repoConfig{}}
