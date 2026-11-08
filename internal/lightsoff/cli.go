@@ -19,7 +19,8 @@ import (
 const usage = `usage: lights-off <owner>/<repo> --ticket=<ticket> [--no-dashboard]
        lights-off <owner>/<repo> --n=<count> [--no-dashboard]
        lights-off plan <owner>/<repo> [--no-dashboard]
-       lights-off repo add <owner>/<repo>   opt in a repository
+       lights-off repo add <owner>/<repo>      opt in a repository
+       lights-off repo remove <owner>/<repo>   opt out a repository
        lights-off --version`
 
 // Exit codes.
@@ -123,6 +124,7 @@ const (
 	verbRun verb = iota
 	verbPlan
 	verbRepoAdd
+	verbRepoRemove
 )
 
 type options struct {
@@ -156,6 +158,13 @@ func Run(args []string, env Env) int {
 	}
 	if opts.verb == verbRepoAdd {
 		if err := addRepo(opts.repo, env); err != nil {
+			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
+			return exitFailure
+		}
+		return exitOK
+	}
+	if opts.verb == verbRepoRemove {
+		if err := removeRepo(opts.repo, env); err != nil {
 			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
 			return exitFailure
 		}
@@ -365,8 +374,11 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 		case len(positionals) == 3 && positionals[1] == "add":
 			opts.verb = verbRepoAdd
 			opts.repo = positionals[2]
+		case len(positionals) == 3 && positionals[1] == "remove":
+			opts.verb = verbRepoRemove
+			opts.repo = positionals[2]
 		default:
-			return opts, errors.New("expected repo add <owner>/<repo>")
+			return opts, errors.New("expected repo add or repo remove <owner>/<repo>")
 		}
 		if !repoPattern.MatchString(opts.repo) {
 			return opts, errors.New("expected one <owner>/<repo>")

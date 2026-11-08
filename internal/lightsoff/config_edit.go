@@ -68,6 +68,46 @@ func (c configText) withRepo(repo string) string {
 	}
 }
 
+// withoutRepo returns the text with the repository's table and its .secrets
+// table removed, and the lines that were removed. Each table is removed from
+// its header up to the next table header, so the blank lines that separated it
+// from what follows go with it; everything before its header is left alone.
+func (c configText) withoutRepo(repo string) (string, string) {
+	lines := strings.SplitAfter(c.text, "\n")
+	var kept, removed strings.Builder
+	for i := 0; i < len(lines); {
+		header, _, ok := tableHeader(lines[i])
+		if !ok || header != repo {
+			kept.WriteString(lines[i])
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(lines) {
+			if _, _, next := tableHeader(lines[j]); next {
+				break
+			}
+			j++
+		}
+		for _, line := range lines[i:j] {
+			removed.WriteString(line)
+		}
+		i = j
+	}
+	return kept.String(), removed.String()
+}
+
+// tableHeader reads a table header line, telling the repository it belongs to
+// and whether it is its .secrets table.
+func tableHeader(line string) (repo string, secrets, ok bool) {
+	p := &lineParser{rest: strings.TrimSpace(line)}
+	if !p.accept("[") {
+		return "", false, false
+	}
+	repo, secrets, err := p.table()
+	return repo, secrets, err == nil
+}
+
 // write puts edited text in a temporary file in the same directory and renames
 // it over config.toml, so a crash can't leave a half-written config behind. An
 // existing file keeps its mode; a new directory is private to its owner and a

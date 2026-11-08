@@ -291,7 +291,7 @@ func TestTicket2RepoWrongArgumentsPrintUsage(t *testing.T) {
 	cases := map[string][]string{
 		"no subcommand":    {"repo"},
 		"no repository":    {"repo", "add"},
-		"unknown":          {"repo", "remove", "owner/repo"},
+		"unknown":          {"repo", "enable", "owner/repo"},
 		"extra positional": {"repo", "add", "owner/repo", "extra"},
 	}
 	for name, args := range cases {
