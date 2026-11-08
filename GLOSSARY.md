@@ -70,6 +70,14 @@ _Avoid_: Cancelled, stopped
 A GitHub repository whose tickets lights-off plans and completes.
 _Avoid_: Project, workspace
 
+**Opt in**:
+To make a GitHub repository a Target Repository. Lights-off refuses to work on any repository that isn't opted in. Opting out reverses it.
+_Avoid_: Add a project, register, enable
+
+**Allowlist**:
+The GitHub users of one Target Repository whose `ready-for-agent` label makes a ticket eligible. A label added by anyone else doesn't count.
+_Avoid_: Trusted users, whitelist, maintainers
+
 **Implementer**:
 The agent that works a ticket through to an open pull request.
 _Avoid_: Worker, coder
