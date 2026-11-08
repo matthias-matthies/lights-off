@@ -26,8 +26,8 @@ This also installs `sbx` (from `docker/tap`) and `gh`. Upgrade with `brew upgrad
 Or download the latest release yourself:
 
 ```sh
-curl -fsSLO https://github.com/matthias-matthies/lights-off/releases/latest/download/lights-off_v0.1.0_darwin_arm64.tar.gz
-tar -xzf lights-off_v0.1.0_darwin_arm64.tar.gz
+gh release download --repo matthias-matthies/lights-off --pattern '*darwin_arm64.tar.gz'
+tar -xzf lights-off_*_darwin_arm64.tar.gz
 mv lights-off ~/.local/bin/    # or anywhere on your PATH
 lights-off --version
 ```
