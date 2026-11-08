@@ -36,29 +36,21 @@ The binary isn't notarized. If you download it through a browser instead, clear 
 
 ## Setup
 
-Lights-off works only on repositories you opt in to. Opt one in with:
+Lights-off works only on repositories you opt in to. Opt one in, giving the first users on its Allowlist:
 
 ```sh
-lights-off repo add owner/repo
+lights-off repo add owner/repo --allow=your-github-user,other-user
 ```
 
-This creates or edits `~/.config/lights-off/config.toml`, keeping your comments, blank lines and other settings, and adds:
+`--allow` is optional. Without it, an `--n` run picks up nothing until someone is on the Allowlist, and the command warns you. Add more users later with:
 
-```toml
-[repos."owner/repo"]
-allowlist = []
+```sh
+lights-off allowlist add owner/repo alice bob
 ```
 
-An `--n` run picks up nothing until someone is on the Allowlist. Add them by hand, since the CLI doesn't edit Allowlists yet:
+These commands create or edit `~/.config/lights-off/config.toml`, keeping your comments, blank lines and other settings. They work offline and don't read `secrets.env`.
 
-```toml
-[repos."owner/repo"]
-allowlist = ["your-github-user"]   # whose ready-for-agent labels count
-```
-
-`--ticket` still works with an empty Allowlist, after you confirm the override.
-
-The file stays the reference for hand-editing and for settings the CLI doesn't cover, such as `implementer_memory` and repository secrets:
+The config file stays the reference for hand-editing and for settings the CLI doesn't cover, such as `implementer_memory` and repository secrets:
 
 ```toml
 [repos."owner/repo"]
@@ -69,6 +61,10 @@ implementer_memory = "4g"          # optional; defaults to 2g
 STRIPE_KEY = ["api.stripe.com"]    # domains the sbx proxy injects it into
 ```
 
+The CLI accepts only GitHub user logins for `--allow` and `allowlist add`: letters, digits and single hyphens, 1–39 characters, with no leading or trailing hyphen. Bot logins such as `dependabot[bot]` are refused. A hand-edited file still accepts any plain string.
+
+`--ticket` still works with an empty Allowlist, after you confirm the override.
+
 Secrets go in `~/.config/lights-off/secrets.env`, which must have mode `600`:
 
 | Secret | Used by |
@@ -77,7 +73,7 @@ Secrets go in `~/.config/lights-off/secrets.env`, which must have mode `600`:
 | `GITHUB_TOKEN` | Implementer, Planning Session, and lights-off itself for merging |
 | `GITHUB_REVIEWER_TOKEN` (read-only) | Reviewer |
 
-If anything is missing, lights-off refuses to start and says what to add: for a repository that isn't opted in, it prints the `lights-off repo add <owner>/<repo>` command.
+If anything is missing, lights-off refuses to start and says what to add: for a repository that isn't opted in, it prints the `lights-off repo add <owner>/<repo> --allow=<your-github-username>` command.
 
 An `--n` run only picks up tickets whose `ready-for-agent` label was added by someone on the allowlist. Agents see only a ticket's main text, never its comments.
 

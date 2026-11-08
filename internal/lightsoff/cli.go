@@ -19,7 +19,8 @@ import (
 const usage = `usage: lights-off <owner>/<repo> --ticket=<ticket> [--no-dashboard]
        lights-off <owner>/<repo> --n=<count> [--no-dashboard]
        lights-off plan <owner>/<repo> [--no-dashboard]
-       lights-off repo add <owner>/<repo>   opt in a repository
+       lights-off repo add <owner>/<repo> [--allow=<user>,...]   opt in a repository
+       lights-off allowlist add <owner>/<repo> <user>...        add users to its Allowlist
        lights-off --version`
 
 // Exit codes.
@@ -123,6 +124,7 @@ const (
 	verbRun verb = iota
 	verbPlan
 	verbRepoAdd
+	verbAllowlistAdd
 )
 
 type options struct {
@@ -132,6 +134,10 @@ type options struct {
 	n           int
 	noDashboard bool
 	version     bool
+
+	// users are the logins allowlist add was given, or the ones repo add got
+	// through --allow.
+	users []string
 }
 
 // Run executes the command line in args and returns the process exit code.
@@ -154,8 +160,15 @@ func Run(args []string, env Env) int {
 		fmt.Fprintf(env.Stdout, "lights-off %s\n", version)
 		return exitOK
 	}
-	if opts.verb == verbRepoAdd {
-		if err := addRepo(opts.repo, env); err != nil {
+	switch opts.verb {
+	case verbRepoAdd:
+		if err := addRepo(opts.repo, opts.users, env); err != nil {
+			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
+			return exitFailure
+		}
+		return exitOK
+	case verbAllowlistAdd:
+		if err := addAllowlist(opts.repo, opts.users, env); err != nil {
 			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
 			return exitFailure
 		}
@@ -168,8 +181,7 @@ func Run(args []string, env Env) int {
 		return exitFailure
 	}
 	if !cfg.optedIn(opts.repo) {
-		fmt.Fprintf(env.Stderr, "lights-off: %s is not opted in. To opt it in, run:\n\n    lights-off repo add %s\n",
-			opts.repo, opts.repo)
+		fmt.Fprintf(env.Stderr, "lights-off: %s\n", optInHint(opts.repo))
 		return exitFailure
 	}
 
@@ -331,6 +343,8 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	fs.IntVar(&opts.n, "n", 0, "")
 	fs.BoolVar(&opts.noDashboard, "no-dashboard", false, "")
 	fs.BoolVar(&opts.version, "version", false, "")
+	var allow string
+	fs.StringVar(&allow, "allow", "", "")
 
 	// The flag package stops at the first positional, and the repository comes
 	// first, so parse around positionals.
@@ -365,22 +379,50 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 		case len(positionals) == 3 && positionals[1] == "add":
 			opts.verb = verbRepoAdd
 			opts.repo = positionals[2]
+			users, err := parseAllowFlag(allow, set["allow"])
+			if err != nil {
+				return opts, err
+			}
+			opts.users = users
 		default:
-			return opts, errors.New("expected repo add <owner>/<repo>")
+			return opts, errors.New("expected repo add <owner>/<repo> [--allow=<user>,...]")
 		}
 		if !repoPattern.MatchString(opts.repo) {
 			return opts, errors.New("expected one <owner>/<repo>")
 		}
 		return opts, nil
 	}
+	if len(positionals) > 0 && positionals[0] == "allowlist" {
+		if set["ticket"] || set["n"] || set["no-dashboard"] || set["allow"] {
+			return opts, errors.New("allowlist takes none of --ticket, --n, --no-dashboard or --allow")
+		}
+		switch {
+		case len(positionals) >= 4 && positionals[1] == "add":
+			opts.verb = verbAllowlistAdd
+			opts.repo = positionals[2]
+			opts.users = positionals[3:]
+		default:
+			return opts, errors.New("expected allowlist add <owner>/<repo> <user>...")
+		}
+		if !repoPattern.MatchString(opts.repo) {
+			return opts, errors.New("expected one <owner>/<repo>")
+		}
+		if err := validateLogins(opts.users); err != nil {
+			return opts, err
+		}
+		return opts, nil
+	}
 	if len(positionals) > 0 && positionals[0] == "plan" {
 		opts.verb = verbPlan
 		positionals = positionals[1:]
-		if set["ticket"] || set["n"] {
-			return opts, errors.New("plan takes neither --ticket nor --n")
+		if set["ticket"] || set["n"] || set["allow"] {
+			return opts, errors.New("plan takes none of --ticket, --n or --allow")
 		}
 	} else if set["ticket"] == set["n"] {
 		return opts, errors.New("pass exactly one of --ticket and --n")
+	}
+	if set["allow"] {
+		return opts, errors.New("--allow is only for repo add")
 	}
 	if len(positionals) != 1 || !repoPattern.MatchString(positionals[0]) {
 		return opts, errors.New("expected one <owner>/<repo>")

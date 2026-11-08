@@ -2,30 +2,42 @@ package lightsoff
 
 import "fmt"
 
-// addRepo opts a repository in by appending its table to config.toml. It only
-// edits config: it sends no commands and needs no secrets.
-func addRepo(repo string, env Env) error {
+// addRepo opts a repository in by appending its table to config.toml, with the
+// users --allow gave it. It only edits config: it sends no commands, reads no
+// secrets and touches no cache or state.
+func addRepo(repo string, users []string, env Env) error {
 	c, err := readConfigText(env.ConfigDir)
 	if err != nil {
 		return err
 	}
 	if c.cfg.optedIn(repo) {
 		fmt.Fprintf(env.Stdout, "lights-off: %s is already opted in.\n", repo)
-		warnIfAllowlistEmpty(env, c.cfg.repos[repo].allowlist)
+		if len(users) == 0 {
+			warnIfAllowlistEmpty(env, c.cfg.repos[repo].allowlist)
+			return nil
+		}
+		edited, added, already, err := c.addingUsers(repo, users)
+		if err != nil {
+			return err
+		}
+		// Re-running the command from the refusal must be safe, so an
+		// Allowlist that already holds every user is left untouched.
+		if len(added) > 0 {
+			if err := c.writeChecked(edited); err != nil {
+				return err
+			}
+		}
+		reportAllowlist(env, repo, added, already)
 		return nil
 	}
 
-	edited := c.withRepo(repo)
-	// Every edit is checked with the same parser the next run will use, so a
-	// config lights-off wrote is one it can read back.
-	if _, line, err := parseConfig(edited); err != nil {
-		return fmt.Errorf("%s:%d: edited config.toml is invalid: %w", configPath(env.ConfigDir), line, err)
-	}
-	if err := c.write(edited); err != nil {
+	allowlist, _, _ := mergeUsers(nil, users)
+	if err := c.writeChecked(c.withRepo(repo, allowlist)); err != nil {
 		return err
 	}
 	fmt.Fprintf(env.Stdout, "lights-off: %s is opted in.\n", repo)
-	warnIfAllowlistEmpty(env, nil)
+	reportAllowlist(env, repo, allowlist, nil)
+	warnIfAllowlistEmpty(env, allowlist)
 	return nil
 }
 
