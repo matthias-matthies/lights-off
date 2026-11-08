@@ -1,0 +1,37 @@
+# Lights-off merges a pull request only when every check on it is green, and a
+# pull request with no checks waits rather than passing, so this runs on every
+# pull request, with no path filters.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would change:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+      - run: go vet ./...
+      - run: go test -race ./...
+      # The tool ships for macOS on Apple silicon too, and has darwin-only files.
+      - name: build for every release platform
+        run: |
+          for target in darwin/arm64 linux/amd64 linux/arm64; do
+            GOOS="${target%/*}" GOARCH="${target#*/}" go build -o /dev/null ./cmd/lights-off
+          done
