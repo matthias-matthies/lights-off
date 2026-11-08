@@ -15,7 +15,15 @@ Agents never get read access to your secrets. Credentials reach a sandbox only t
 
 ## Install
 
-Download the latest release:
+With Homebrew:
+
+```sh
+brew install --cask matthias-matthies/tap/lights-off
+```
+
+This also installs `sbx` (from `docker/tap`) and `gh`. Upgrade with `brew upgrade lights-off`.
+
+Or download the latest release yourself:
 
 ```sh
 gh release download --repo matthias-matthies/lights-off --pattern '*darwin_arm64.tar.gz'
@@ -24,7 +32,7 @@ mv lights-off ~/.local/bin/    # or anywhere on your PATH
 lights-off --version
 ```
 
-The binary isn't notarized. If you download it through a browser instead, clear the quarantine flag with `xattr -d com.apple.quarantine lights-off`.
+The binary isn't notarized. If you download it through a browser instead, clear the quarantine flag with `xattr -d com.apple.quarantine lights-off`. The Homebrew cask clears it for you.
 
 ## Setup
 
