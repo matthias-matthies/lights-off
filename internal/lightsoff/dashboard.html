@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lights-off dashboard</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --background: #f5f2ea;
+    --foreground: #1d1d1b;
+    --muted: #6b6862;
+    --card: #fffdf7;
+    --border: #ded8ca;
+    --accent: #a0441c;
+    --eligible: #2f7d4a;
+    --eligible-soft: #e7f2e9;
+    --ineligible: #9a5b13;
+    --ineligible-soft: #f8edda;
+    --edge: #8b8375;
+    --edge-soft: #c9c1b2;
+    --panel: #fbf8f1;
+    --error: #a52a2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #1d1d1b;
+      --foreground: #f5f2ea;
+      --muted: #b9b4a8;
+      --card: #262624;
+      --border: #3d3b37;
+      --accent: #e08a5b;
+      --eligible: #7bcf9a;
+      --eligible-soft: #213329;
+      --ineligible: #e6b56b;
+      --ineligible-soft: #362c1e;
+      --edge: #8d877b;
+      --edge-soft: #49453e;
+      --panel: #232321;
+      --error: #f08a8a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    padding: 2rem;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  main {
+    width: min(96rem, 100%);
+    margin: 0 auto;
+    padding: 1.6rem 1.8rem 2rem;
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    background: var(--card);
+    box-shadow: 0 1rem 3rem rgb(0 0 0 / 8%);
+  }
+  .eyebrow {
+    margin: 0;
+    color: var(--accent);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  h1 { margin: 0.2rem 0 0.6rem; font-size: 1.7rem; }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1.4rem;
+    margin: 0 0 1rem;
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+  .meta strong { color: var(--foreground); font-weight: 600; }
+  .meta .value {
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .fetch-state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.3rem 0.75rem;
+    margin: 0;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .fetch-state #last-successful-fetch { color: var(--foreground); }
+  .error {
+    margin: 0.7rem 0 0;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--error) 10%, transparent);
+    color: var(--error);
+    font-size: 0.9rem;
+  }
+  .ended {
+    margin: 0.7rem 0 0;
+    padding: 0.65rem 0.9rem;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .summary-panel {
+    margin: 1rem 0 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background: var(--panel);
+  }
+  .summary-panel h2 { margin: 0 0 0.5rem; font-size: 1rem; }
+  .summary-panel pre {
+    margin: 0;
+    overflow-x: auto;
+    color: var(--foreground);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.4rem;
+    margin: 1rem 0 0.4rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .swatch { width: 0.7rem; height: 0.7rem; border-radius: 0.2rem; border: 2px solid; }
+  .swatch.eligible { border-color: var(--eligible); background: var(--eligible-soft); }
+  .swatch.ineligible { border-color: var(--ineligible); background: var(--ineligible-soft); }
+  .graph { margin-top: 0.5rem; overflow-x: auto; }
+  .graph svg { display: block; width: 100%; height: auto; min-width: 44rem; }
+  .empty { margin: 2rem 0; color: var(--muted); text-align: center; }
+  .group-label {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .group-panel { fill: var(--panel); stroke: var(--border); stroke-width: 1; }
+  .group-panel.eligible { stroke: color-mix(in srgb, var(--eligible) 32%, var(--border)); }
+  .group-panel.ineligible { stroke: color-mix(in srgb, var(--ineligible) 32%, var(--border)); }
+  .edge { fill: none; stroke: var(--edge); stroke-width: 1.5; }
+  .edge.closed { stroke: var(--edge-soft); stroke-dasharray: 4 4; }
+  .arrow-head { fill: var(--edge); }
+  .ticket { fill: var(--card); stroke-width: 2; }
+  .ticket.eligible { stroke: var(--eligible); }
+  .ticket.ineligible { stroke: var(--ineligible); }
+  .ticket-link { cursor: pointer; }
+  .ticket-link:hover .ticket, .ticket-link:focus .ticket { stroke-width: 3; }
+  .ticket-link:focus { outline: none; }
+  .ticket-number { fill: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .ticket-title { fill: var(--foreground); }
+  .ticket-label { fill: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .ticket-state { fill: var(--muted); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+  .ticket-state.eligible { fill: var(--eligible); }
+  .ticket-state.ineligible { fill: var(--ineligible); }
+  .ticket-attempt-phase { fill: var(--accent); font-weight: 700; }
+  .ticket-attempt-meta { fill: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .ticket-verdict { fill: var(--foreground); }
+  .ticket-attempt-reason { fill: var(--ineligible); }
+  .ticket-attempt-link { fill: var(--accent); text-decoration: underline; cursor: pointer; }
+  .ticket-attempt-link:hover, .ticket-attempt-link:focus { text-decoration: none; }
+  .failed-heading { fill: var(--ineligible); letter-spacing: 0.05em; text-transform: uppercase; }
+  .failed-check { fill: var(--foreground); }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">lights-off</p>
+  <h1>Ticket graph</h1>
+  <div class="meta">
+    <span><strong>Target Repository</strong> <span class="value" id="repository">{{.Repo}}</span></span>
+    <span><strong>Command</strong> <span class="value" id="command">{{.Command}}</span></span>
+  </div>
+  <p class="fetch-state">
+    <span id="last-successful-fetch">No successful fetch yet</span>
+    <span id="fetching" hidden>Fetching…</span>
+    <span id="live-state">Live updates: connecting…</span>
+  </p>
+  <p class="ended" id="ended" role="status" hidden></p>
+  <section class="summary-panel" id="summary" aria-labelledby="summary-heading" hidden>
+    <h2 id="summary-heading">Summary</h2>
+    <pre id="summary-text"></pre>
+  </section>
+  <p class="error" id="graph-error" role="alert" hidden></p>
+  <div class="legend" aria-hidden="true">
+    <span><i class="swatch eligible"></i>Eligible: the next run could pick it up</span>
+    <span><i class="swatch ineligible"></i>Not eligible: held back, with the failed checks shown</span>
+  </div>
+  <div class="graph" id="graph">
+    <p class="empty">Loading the ticket graph…</p>
+  </div>
+</main>
+<script>
+(() => {
+  "use strict";
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const POLL_INTERVAL = 60000;
+  const CARD_WIDTH = 300;
+  const CARD_PADDING = 14;
+  const CARD_GAP = 22;
+  const COLUMN_WIDTH = CARD_WIDTH + CARD_GAP;
+  const GROUP_GAP = 54;
+  const ROW_GAP = 40;
+  const MARGIN = 24;
+  const HEADER = 58;
+  const LINE_HEIGHT = 17;
+
+  const graphEl = document.getElementById("graph");
+  const errorEl = document.getElementById("graph-error");
+  const lastFetchEl = document.getElementById("last-successful-fetch");
+  const fetchingEl = document.getElementById("fetching");
+  const liveStateEl = document.getElementById("live-state");
+  const endedEl = document.getElementById("ended");
+  const summaryEl = document.getElementById("summary");
+  const summaryTextEl = document.getElementById("summary-text");
+  const token = new URLSearchParams(window.location.search).get("token") || "";
+
+  // The latest event of each ticket. Every event is a complete snapshot of the
+  // Attempt's current state, including a Hand-back reason for as long as it
+  // explains the running Iteration, so the page replaces a ticket's entry
+  // rather than merging fields into an older event. That is what lets a
+  // reconnected stream catch up after a dropped connection: a reason the
+  // snapshot no longer carries does not linger.
+  const attempts = new Map();
+  let previousGraph = null;
+  let fetching = false;
+  let eventSource = null;
+  let connected = false;
+  let ended = false;
+  let pollTimer = null;
+
+  function svg(name, attrs = {}) {
+    const node = document.createElementNS(SVG_NS, name);
+    for (const [key, value] of Object.entries(attrs)) {
+      node.setAttribute(key, value);
+    }
+    return node;
+  }
+
+  function text(parent, x, y, content, className, attrs = {}) {
+    const node = svg("text", { x, y, class: className, ...attrs });
+    node.textContent = content;
+    parent.appendChild(node);
+    return node;
+  }
+
+  function wrap(value, width) {
+    const words = String(value == null ? "" : value).split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [""];
+    const lines = [];
+    let line = "";
+    for (const word of words) {
+      const candidate = line ? line + " " + word : word;
+      if (!line || candidate.length <= width) {
+        line = candidate;
+      } else {
+        lines.push(line);
+        line = word;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  function attemptFor(number) {
+    return attempts.get(number) || null;
+  }
+
+  function attemptLines(ticket, attempt, repo) {
+    const lines = [];
+    if (!attempt) return lines;
+
+    if (attempt.kind === "skipped") {
+      lines.push({ text: "Skipped: " + (attempt.reason || "not eligible"), className: "ticket-attempt-reason", size: 11, weight: 600, height: LINE_HEIGHT, gapBefore: 4 });
+      return lines;
+    }
+
+    if (attempt.phase) {
+      lines.push({
+        text: "Attempt: " + attempt.phase,
+        className: "ticket-attempt-phase",
+        size: 11,
+        height: LINE_HEIGHT,
+        gapBefore: 4,
+      });
+    }
+    if (attempt.iteration) {
+      lines.push({
+        text: "Iteration " + attempt.iteration + " of 3",
+        className: "ticket-attempt-meta",
+        size: 11,
+        height: LINE_HEIGHT,
+      });
+    }
+    if (attempt.verdict) {
+      const verdict = attempt.verdict;
+      const mergeable = verdict.mergeable ? "mergeable" : "not mergeable";
+      const risk = (verdict.risk || "unknown") + " risk";
+      const update = verdict.update === "one-way" ? "One-way Update" : verdict.update === "two-way" ? "Two-way Update" : (verdict.update || "unknown Update");
+      for (const part of wrap("Verdict: " + [mergeable, risk, update].join(", "), 40)) {
+        lines.push({ text: part, className: "ticket-verdict", size: 11, height: LINE_HEIGHT });
+      }
+    }
+    if (attempt.reason) {
+      let label = "Reason";
+      if (attempt.reasonKind === "hand-back" || attempt.kind === "handed-back") label = "Hand-back";
+      else if (attempt.reasonKind === "ready-for-human" || attempt.kind === "ready-for-human" || attempt.phase === "Ready for human") label = "Ready for human";
+      else if (attempt.reasonKind === "stopped" || attempt.kind === "stopped") label = "Stopped";
+      const parts = wrap(label + ": " + attempt.reason, 38);
+      parts.forEach((part, index) => {
+        lines.push({
+          text: (index === 0 ? "" : "  ") + part,
+          className: "ticket-attempt-reason",
+          size: 11,
+          height: LINE_HEIGHT,
+        });
+      });
+    }
+    if (attempt.pullRequest) {
+      lines.push({
+        text: "Pull request #" + attempt.pullRequest,
+        className: "ticket-attempt-link",
+        size: 11,
+        height: LINE_HEIGHT,
+        href: "https://github.com/" + repo + "/pull/" + attempt.pullRequest,
+      });
+    }
+    if (attempt.sandbox) {
+      for (const part of wrap("Sandbox: " + attempt.sandbox, 40)) {
+        lines.push({ text: part, className: "ticket-attempt-meta", size: 10, height: LINE_HEIGHT });
+      }
+    }
+    return lines;
+  }
+
+  function cardLines(ticket, attempt, repo) {
+    const lines = [];
+    lines.push({ text: "#" + ticket.number, className: "ticket-number", size: 13, weight: 700, height: 19 });
+    for (const part of wrap(ticket.title, 34)) {
+      lines.push({ text: part, className: "ticket-title", size: 14, weight: 600, height: 19 });
+    }
+    const labels = Array.isArray(ticket.labels) ? ticket.labels : [];
+    if (labels.length > 0) {
+      for (const part of wrap(labels.join(" · "), 40)) {
+        lines.push({ text: part, className: "ticket-label", size: 11, height: 16 });
+      }
+    }
+    lines.push(...attemptLines(ticket, attempt, repo));
+    lines.push({
+      text: ticket.eligible ? "Eligible" : "Not eligible",
+      className: "ticket-state " + (ticket.eligible ? "eligible" : "ineligible"),
+      size: 10,
+      height: 18,
+      gapBefore: 2,
+    });
+    if (!ticket.eligible) {
+      const checks = Array.isArray(ticket.failedChecks) ? ticket.failedChecks : [];
+      lines.push({ text: "Failed checks", className: "failed-heading", size: 10, weight: 700, height: 17, gapBefore: 4 });
+      for (const check of checks) {
+        const parts = wrap(check, 38);
+        parts.forEach((part, index) => {
+          lines.push({
+            text: (index === 0 ? "• " : "  ") + part,
+            className: "failed-check",
+            size: 11,
+            height: LINE_HEIGHT,
+          });
+        });
+      }
+    }
+    return lines;
+  }
+
+  function heightOf(lines) {
+    return lines.reduce((sum, line) => sum + line.height + (line.gapBefore || 0), CARD_PADDING * 2);
+  }
+
+  function computeDepths(tickets, repo) {
+    const byNumber = new Map(tickets.map((ticket) => [ticket.number, ticket]));
+    const depths = new Map();
+    const visiting = new Set();
+
+    function depth(ticket) {
+      if (depths.has(ticket.number)) return depths.get(ticket.number);
+      if (visiting.has(ticket.number)) return 0; // malformed data can contain a cycle
+      visiting.add(ticket.number);
+      let value = 0;
+      for (const blocker of ticket.blockers || []) {
+        if (!blocker.open || blocker.repo !== repo) continue;
+        const parent = byNumber.get(blocker.number);
+        if (!parent) continue;
+        value = Math.max(value, depth(parent) + 1);
+      }
+      visiting.delete(ticket.number);
+      depths.set(ticket.number, value);
+      return value;
+    }
+
+    for (const ticket of tickets) depth(ticket);
+    return { byNumber, depths };
+  }
+
+  function render(graph) {
+    const tickets = Array.isArray(graph.tickets) ? graph.tickets : [];
+    graphEl.replaceChildren();
+    if (tickets.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "empty";
+      empty.textContent = "There are no open tickets.";
+      graphEl.appendChild(empty);
+      return;
+    }
+
+    const { byNumber, depths } = computeDepths(tickets, graph.repo);
+    const layers = new Map();
+    for (const ticket of tickets) {
+      const layer = depths.get(ticket.number) || 0;
+      if (!layers.has(layer)) layers.set(layer, []);
+      layers.get(layer).push(ticket);
+    }
+
+    const measured = new Map();
+    for (const ticket of tickets) {
+      const lines = cardLines(ticket, attemptFor(ticket.number), graph.repo);
+      measured.set(ticket.number, { lines, height: heightOf(lines) });
+    }
+
+    let eligibleColumns = 1;
+    let ineligibleColumns = 1;
+    const orderedLayers = [...layers.keys()].sort((a, b) => a - b);
+    for (const layer of orderedLayers) {
+      const row = layers.get(layer);
+      const eligible = row.filter((ticket) => ticket.eligible).length;
+      eligibleColumns = Math.max(eligibleColumns, eligible);
+      ineligibleColumns = Math.max(ineligibleColumns, row.length - eligible);
+    }
+
+    const eligibleWidth = eligibleColumns * COLUMN_WIDTH - CARD_GAP;
+    const ineligibleWidth = ineligibleColumns * COLUMN_WIDTH - CARD_GAP;
+    const eligibleX = MARGIN;
+    const ineligibleX = MARGIN + eligibleWidth + GROUP_GAP;
+    const width = ineligibleX + ineligibleWidth + MARGIN;
+
+    const positions = new Map();
+    let y = HEADER;
+    for (const layer of orderedLayers) {
+      const row = layers.get(layer);
+      const rowHeight = Math.max(...row.map((ticket) => measured.get(ticket.number).height));
+      const eligible = row.filter((ticket) => ticket.eligible).sort((a, b) => a.number - b.number);
+      const ineligible = row.filter((ticket) => !ticket.eligible).sort((a, b) => a.number - b.number);
+      let x = eligibleX;
+      for (const ticket of eligible) {
+        positions.set(ticket.number, { x, y, width: CARD_WIDTH, height: measured.get(ticket.number).height });
+        x += COLUMN_WIDTH;
+      }
+      x = ineligibleX;
+      for (const ticket of ineligible) {
+        positions.set(ticket.number, { x, y, width: CARD_WIDTH, height: measured.get(ticket.number).height });
+        x += COLUMN_WIDTH;
+      }
+      y += rowHeight + ROW_GAP;
+    }
+    const height = Math.max(HEADER + 80, y - ROW_GAP + MARGIN);
+
+    const eligibleCount = tickets.filter((ticket) => ticket.eligible).length;
+    const ineligibleCount = tickets.length - eligibleCount;
+
+    const root = svg("svg", {
+      viewBox: `0 0 ${width} ${height}`,
+      role: "img",
+      "aria-label": `${eligibleCount} eligible and ${ineligibleCount} not eligible open tickets`,
+    });
+
+    const defs = svg("defs");
+    const marker = svg("marker", {
+      id: "blocker-arrow",
+      viewBox: "0 0 10 10",
+      refX: "9",
+      refY: "5",
+      markerWidth: "7",
+      markerHeight: "7",
+      orient: "auto-start-reverse",
+    });
+    marker.appendChild(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", class: "arrow-head" }));
+    defs.appendChild(marker);
+    root.appendChild(defs);
+
+    const panelTop = HEADER - 16;
+    const panelHeight = height - panelTop - MARGIN + 16;
+    root.appendChild(svg("rect", {
+      x: eligibleX - 12,
+      y: panelTop,
+      width: eligibleWidth + 24,
+      height: panelHeight,
+      rx: 12,
+      class: "group-panel eligible",
+    }));
+    root.appendChild(svg("rect", {
+      x: ineligibleX - 12,
+      y: panelTop,
+      width: ineligibleWidth + 24,
+      height: panelHeight,
+      rx: 12,
+      class: "group-panel ineligible",
+    }));
+    text(root, eligibleX, 24, `Eligible (${eligibleCount})`, "group-label");
+    text(root, ineligibleX, 24, `Not eligible (${ineligibleCount})`, "group-label");
+
+    // Edges are drawn first, so cards cover them. A closed blocker still has a
+    // dashed edge, but it doesn't move the dependent down a layer.
+    for (const ticket of tickets) {
+      for (const blocker of ticket.blockers || []) {
+        if (blocker.repo !== graph.repo) continue;
+        const from = positions.get(blocker.number);
+        const to = positions.get(ticket.number);
+        if (!from || !to) continue;
+        const x1 = from.x + from.width / 2;
+        const y1 = from.y + from.height;
+        const x2 = to.x + to.width / 2;
+        const y2 = to.y;
+        const middle = (y1 + y2) / 2;
+        const path = svg("path", {
+          d: `M ${x1} ${y1} C ${x1} ${middle}, ${x2} ${middle}, ${x2} ${y2}`,
+          class: "edge" + (blocker.open ? "" : " closed"),
+          "marker-end": "url(#blocker-arrow)",
+        });
+        const title = svg("title");
+        title.textContent = `#${blocker.number} blocks #${ticket.number}`;
+        path.appendChild(title);
+        root.appendChild(path);
+      }
+    }
+
+    for (const ticket of tickets) {
+      const position = positions.get(ticket.number);
+      if (!position) continue;
+      const content = measured.get(ticket.number);
+      const link = svg("a", {
+        href: ticket.url,
+        target: "_blank",
+        rel: "noreferrer",
+        class: "ticket-link",
+        "aria-label": `Open issue #${ticket.number}: ${ticket.title}`,
+      });
+      const title = svg("title");
+      title.textContent = `#${ticket.number} ${ticket.title} (opens the issue)`;
+      link.appendChild(title);
+      link.appendChild(svg("rect", {
+        x: position.x,
+        y: position.y,
+        width: position.width,
+        height: position.height,
+        rx: 10,
+        class: "ticket " + (ticket.eligible ? "eligible" : "ineligible"),
+      }));
+      let baseline = position.y + CARD_PADDING;
+      const linkedLines = [];
+      for (const line of content.lines) {
+        baseline += line.gapBefore || 0;
+        if (line.href) {
+          linkedLines.push({ line, y: baseline + line.size });
+        } else {
+          text(link, position.x + CARD_PADDING, baseline + line.size, line.text, line.className, {
+            "font-size": line.size,
+            "font-weight": line.weight || 400,
+          });
+        }
+        baseline += line.height;
+      }
+      root.appendChild(link);
+      // A link cannot be nested in the issue link, so the pull request line is
+      // drawn above the card as its own anchor.
+      for (const { line, y } of linkedLines) {
+        const attemptLink = svg("a", {
+          href: line.href,
+          target: "_blank",
+          rel: "noreferrer",
+          class: "ticket-attempt-link",
+          "aria-label": line.text + " (opens the pull request)",
+        });
+        text(attemptLink, position.x + CARD_PADDING, y, line.text, line.className, {
+          "font-size": line.size,
+          "font-weight": line.weight || 400,
+        });
+        root.appendChild(attemptLink);
+      }
+    }
+
+    graphEl.appendChild(root);
+  }
+
+  function showError(message) {
+    errorEl.textContent = message;
+    errorEl.hidden = false;
+  }
+
+  function clearError() {
+    errorEl.textContent = "";
+    errorEl.hidden = true;
+  }
+
+  function markEnded(message) {
+    if (ended) return;
+    ended = true;
+    endedEl.textContent = message;
+    endedEl.hidden = false;
+    liveStateEl.textContent = "Live updates: ended";
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    if (pollTimer !== null) {
+      window.clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function showSummary(event) {
+    if (typeof event.summary !== "string" || event.summary === "") return;
+    summaryTextEl.textContent = event.summary;
+    summaryEl.hidden = false;
+  }
+
+  function applyEvent(event) {
+    if (!event) return;
+    // A run's summary is the last event it sends. The page keeps the graph and
+    // the last state of every ticket it already has; it only adds the summary
+    // and stops saying that more is coming.
+    if (event.kind === "summary") {
+      showSummary(event);
+      markEnded("Run ended. Nothing more will change.");
+      return;
+    }
+    if (event.kind === "session-ended") {
+      markEnded("Planning Session ended. Nothing more will change.");
+      return;
+    }
+    if (ended || !Number.isFinite(event.ticket) || event.ticket <= 0) return;
+    // The server sends each event as the whole current state of its ticket.
+    // Replacing the entry, rather than merging into the previous event, means a
+    // Hand-back reason travels only as far as the server carries it and a
+    // stale Verdict from an earlier Iteration cannot survive a new one.
+    attempts.set(event.ticket, event);
+    if (previousGraph) render(previousGraph);
+  }
+
+  function connectEvents() {
+    if (!window.EventSource) {
+      liveStateEl.textContent = "Live updates unavailable in this browser";
+      return;
+    }
+    eventSource = new EventSource("/events?token=" + encodeURIComponent(token));
+    eventSource.onopen = () => {
+      connected = true;
+      if (!ended) liveStateEl.textContent = "Live updates: connected";
+    };
+    eventSource.onmessage = (message) => {
+      try {
+        applyEvent(JSON.parse(message.data));
+      } catch (error) {
+        showError("Could not read a live Ticket Attempt event: " + error.message);
+      }
+    };
+    // EventSource reconnects by itself. The server sends the latest event for
+    // every ticket again on that new connection, so the page catches up.
+    eventSource.onerror = () => {
+      if (ended) return;
+      if (eventSource.readyState === EventSource.CLOSED) {
+        markEnded("The live update stream closed. Nothing more will change.");
+        return;
+      }
+      if (connected) {
+        // The first error after a working connection starts a reconnect. If
+        // that reconnect fails too, this branch will not run again: the error
+        // below marks the page as ended.
+        connected = false;
+        liveStateEl.textContent = "Live updates: reconnecting…";
+        return;
+      }
+      markEnded("The stream closed and could not reconnect. Nothing more will change.");
+    };
+  }
+
+  async function fetchGraph() {
+    if (fetching || ended) return;
+    fetching = true;
+    fetchingEl.hidden = false;
+    try {
+      const response = await fetch("/graph?token=" + encodeURIComponent(token), {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) {
+        throw new Error(`the graph endpoint answered HTTP ${response.status}`);
+      }
+      const graph = await response.json();
+      if (ended) return;
+      render(graph);
+      previousGraph = graph;
+      lastFetchEl.textContent = "Last successful fetch: " + new Date().toLocaleString();
+      clearError();
+    } catch (error) {
+      if (ended) return;
+      showError("Could not fetch the ticket graph: " + error.message + ". Showing the last graph fetched.");
+      if (previousGraph) {
+        render(previousGraph);
+      } else {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "No ticket graph has been fetched yet.";
+        graphEl.replaceChildren(empty);
+      }
+    } finally {
+      fetching = false;
+      fetchingEl.hidden = true;
+    }
+  }
+
+  connectEvents();
+  fetchGraph();
+  pollTimer = window.setInterval(fetchGraph, POLL_INTERVAL);
+})();
+</script>
+</body>
+</html>

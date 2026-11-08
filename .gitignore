@@ -1,0 +1,5 @@
+# Local spike scratch: test repos, cloned skills, caches and copied evidence.
+.spike/
+.DS_Store
+/lights-off
+/dist/
