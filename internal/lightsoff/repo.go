@@ -1,6 +1,11 @@
 package lightsoff
 
-import "fmt"
+import (
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+)
 
 // addRepo opts a repository in by appending its table to config.toml. It only
 // edits config: it sends no commands and needs no secrets.
@@ -35,4 +40,29 @@ func warnIfAllowlistEmpty(env Env, allowlist []string) {
 		return
 	}
 	fmt.Fprintln(env.Stderr, "lights-off: --n will pick up nothing until someone is on the Allowlist; --ticket still works with a confirmed override")
+}
+
+// listRepos shows every Target Repository and its Allowlist. It reads config
+// only: it writes nothing, sends no commands and never shows secrets or memory
+// settings.
+func listRepos(env Env) error {
+	cfg, err := loadConfig(env.ConfigDir)
+	if err != nil {
+		return err
+	}
+	if len(cfg.repos) == 0 {
+		fmt.Fprintln(env.Stdout, "lights-off: no Target Repositories are opted in. To opt one in, run:")
+		fmt.Fprintln(env.Stdout)
+		fmt.Fprintln(env.Stdout, "    lights-off repo add <owner>/<repo>")
+		return nil
+	}
+	for _, repo := range slices.Sorted(maps.Keys(cfg.repos)) {
+		allowlist := cfg.repos[repo].allowlist
+		if len(allowlist) == 0 {
+			fmt.Fprintf(env.Stdout, "%s: (empty allowlist)\n", repo)
+			continue
+		}
+		fmt.Fprintf(env.Stdout, "%s: %s\n", repo, strings.Join(allowlist, ", "))
+	}
+	return nil
 }

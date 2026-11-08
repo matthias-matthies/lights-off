@@ -20,6 +20,7 @@ const usage = `usage: lights-off <owner>/<repo> --ticket=<ticket> [--no-dashboar
        lights-off <owner>/<repo> --n=<count> [--no-dashboard]
        lights-off plan <owner>/<repo> [--no-dashboard]
        lights-off repo add <owner>/<repo>   opt in a repository
+       lights-off repo list                show Target Repositories and their Allowlists
        lights-off --version`
 
 // Exit codes.
@@ -123,6 +124,7 @@ const (
 	verbRun verb = iota
 	verbPlan
 	verbRepoAdd
+	verbRepoList
 )
 
 type options struct {
@@ -154,8 +156,15 @@ func Run(args []string, env Env) int {
 		fmt.Fprintf(env.Stdout, "lights-off %s\n", version)
 		return exitOK
 	}
-	if opts.verb == verbRepoAdd {
+	switch opts.verb {
+	case verbRepoAdd:
 		if err := addRepo(opts.repo, env); err != nil {
+			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
+			return exitFailure
+		}
+		return exitOK
+	case verbRepoList:
+		if err := listRepos(env); err != nil {
 			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
 			return exitFailure
 		}
@@ -362,14 +371,16 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 			return opts, errors.New("repo takes none of --ticket, --n or --no-dashboard")
 		}
 		switch {
+		case len(positionals) == 2 && positionals[1] == "list":
+			opts.verb = verbRepoList
 		case len(positionals) == 3 && positionals[1] == "add":
 			opts.verb = verbRepoAdd
 			opts.repo = positionals[2]
+			if !repoPattern.MatchString(opts.repo) {
+				return opts, errors.New("expected one <owner>/<repo>")
+			}
 		default:
-			return opts, errors.New("expected repo add <owner>/<repo>")
-		}
-		if !repoPattern.MatchString(opts.repo) {
-			return opts, errors.New("expected one <owner>/<repo>")
+			return opts, errors.New("expected repo add <owner>/<repo> or repo list")
 		}
 		return opts, nil
 	}

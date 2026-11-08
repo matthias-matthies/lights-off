@@ -352,3 +352,201 @@ func TestTicket2RepoAddThenTicketRunGetsPastTheOptInCheck(t *testing.T) {
 		t.Error("ticket run stopped before doing anything")
 	}
 }
+
+func TestTicket3RepoListShowsEachRepositorySorted(t *testing.T) {
+	w := newWorld(t)
+	w.skipSecrets = true
+	w.config = "# machines\n\n" +
+		"[repos.\"owner/zebra\"]\nallowlist = [\"zoe\"]\n\n" +
+		"[repos.\"owner/other\"]\nallowlist = [\"bob\", \"alice\"]\n\n" +
+		"[repos.\"owner/repo\"]\n"
+
+	if code := w.run("repo", "list"); code != 0 {
+		t.Fatalf("exit code = %d\nstderr:\n%s", code, w.stderr.String())
+	}
+
+	want := "owner/other: bob, alice\n" +
+		"owner/repo: (empty allowlist)\n" +
+		"owner/zebra: zoe\n"
+	if got := w.stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	if got := ticket2ReadConfig(t, w); got != w.config {
+		t.Errorf("config.toml =\n%q\nwant it unchanged:\n%q", got, w.config)
+	}
+	if len(w.commands) != 0 {
+		t.Errorf("commands sent: %v", w.commands)
+	}
+}
+
+func TestTicket3RepoListLeavesOutSecretsAndMemory(t *testing.T) {
+	w := newWorld(t)
+	w.skipSecrets = true
+	w.config = "[repos.\"owner/repo\"]\n" +
+		"allowlist = [\"owner\"]\n" +
+		"implementer_memory = \"4g\"\n\n" +
+		"[repos.\"owner/repo\".secrets]\n" +
+		"STRIPE_KEY = [\"api.stripe.com\"]\n"
+
+	if code := w.run("repo", "list"); code != 0 {
+		t.Fatalf("exit code = %d\nstderr:\n%s", code, w.stderr.String())
+	}
+	if got, want := w.stdout.String(), "owner/repo: owner\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	for _, hidden := range []string{"STRIPE_KEY", "api.stripe.com", "4g", "implementer_memory"} {
+		if strings.Contains(w.stdout.String(), hidden) {
+			t.Errorf("stdout shows %q:\n%s", hidden, w.stdout.String())
+		}
+	}
+	if len(w.commands) != 0 {
+		t.Errorf("commands sent: %v", w.commands)
+	}
+}
+
+func TestTicket3RepoListWithNothingOptedInPrintsAHint(t *testing.T) {
+	cases := map[string]struct {
+		config     string
+		skipConfig bool
+	}{
+		"empty config":     {config: "", skipConfig: false},
+		"only comments":    {config: "# nothing here yet\n", skipConfig: false},
+		"no config.toml":   {skipConfig: true},
+		"config directory": {skipConfig: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			w.skipSecrets = true
+			if tc.skipConfig {
+				w.configDir = filepath.Join(t.TempDir(), "missing")
+			} else {
+				w.config = tc.config
+			}
+
+			if code := w.run("repo", "list"); code != 0 {
+				t.Fatalf("exit code = %d\nstderr:\n%s", code, w.stderr.String())
+			}
+			if !strings.Contains(w.stdout.String(), "lights-off repo add") {
+				t.Errorf("stdout should point to lights-off repo add:\n%s", w.stdout.String())
+			}
+			if len(w.commands) != 0 {
+				t.Errorf("commands sent: %v", w.commands)
+			}
+			if tc.skipConfig {
+				if _, err := os.Stat(filepath.Join(w.configDir, "config.toml")); !os.IsNotExist(err) {
+					t.Errorf("repo list created config.toml: %v", err)
+				}
+			} else if got := ticket2ReadConfig(t, w); got != tc.config {
+				t.Errorf("config.toml = %q, want it unchanged: %q", got, tc.config)
+			}
+		})
+	}
+}
+
+func TestTicket3RepoListRefusesAnUnreadableConfigAndLeavesItAlone(t *testing.T) {
+	cases := map[string]string{
+		"unclosed table":      "\n[repos.\"owner/repo\"\n",
+		"unknown key":         "[repos.\"owner/repo\"]\ncolour = \"red\"\n",
+		"multi-line array":    "[repos.\"owner/repo\"]\nallowlist = [\n\"owner\"]\n",
+		"trailing junk":       "[repos.\"owner/repo\"]\nallowlist = [\"owner\"] x\n",
+		"repeated table":      "[repos.\"owner/repo\"]\n[repos.\"owner/repo\"]\n",
+		"key outside a table": "\nallowlist = [\"owner\"]\n",
+	}
+	for name, text := range cases {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			w.config = text
+			w.skipSecrets = true
+
+			if code := w.run("repo", "list"); code == 0 {
+				t.Fatalf("exit code = 0, want non-zero")
+			}
+			if !strings.Contains(w.stderr.String(), "config.toml:") {
+				t.Errorf("stderr should name the file and line: %q", w.stderr.String())
+			}
+			if w.stdout.Len() != 0 {
+				t.Errorf("stdout should be empty, got %q", w.stdout.String())
+			}
+			if got := ticket2ReadConfig(t, w); got != text {
+				t.Errorf("config.toml =\n%q\nwant it unchanged:\n%q", got, text)
+			}
+			if len(w.commands) != 0 {
+				t.Errorf("commands sent: %v", w.commands)
+			}
+		})
+	}
+}
+
+func TestTicket3RepoListTakesNoArguments(t *testing.T) {
+	cases := map[string][]string{
+		"extra positional": {"repo", "list", "owner/repo"},
+		"n":                {"repo", "list", "--n=5"},
+		"ticket":           {"repo", "list", "--ticket=42"},
+		"no-dashboard":     {"repo", "list", "--no-dashboard"},
+		"version":          {"repo", "list", "--version"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			w.skipSecrets = true
+			w.config = "[repos.\"owner/repo\"]\nallowlist = []\n"
+
+			if code := w.run(args...); code != 2 {
+				t.Fatalf("exit code = %d, want 2; stderr:\n%s", code, w.stderr.String())
+			}
+			if !strings.Contains(w.stderr.String(), "usage:") ||
+				!strings.Contains(w.stderr.String(), "repo list") {
+				t.Errorf("stderr should print usage naming repo list: %q", w.stderr.String())
+			}
+			if w.stdout.Len() != 0 {
+				t.Errorf("stdout should be empty, got %q", w.stdout.String())
+			}
+			if got := ticket2ReadConfig(t, w); got != w.config {
+				t.Errorf("config.toml changed to %q", got)
+			}
+			if len(w.commands) != 0 {
+				t.Errorf("commands sent: %v", w.commands)
+			}
+		})
+	}
+}
+
+func TestTicket3HelpListsRepoList(t *testing.T) {
+	w := newWorld(t)
+	if code := w.run("--help"); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(w.stderr.String(), "lights-off repo list") {
+		t.Errorf("help should list repo list:\n%s", w.stderr.String())
+	}
+	if len(w.commands) != 0 {
+		t.Errorf("commands sent: %v", w.commands)
+	}
+}
+
+func TestTicket3RepoListKeepsTheFileMode(t *testing.T) {
+	w := newWorld(t)
+	w.configDir = t.TempDir()
+	w.skipConfig = true
+	w.skipSecrets = true
+	text := "[repos.\"owner/repo\"]\nallowlist = [\"owner\"]\n"
+	ticket2WriteConfig(t, w, text, 0o640)
+
+	if code := w.run("repo", "list"); code != 0 {
+		t.Fatalf("exit code = %d\nstderr:\n%s", code, w.stderr.String())
+	}
+	if got, want := w.stdout.String(), "owner/repo: owner\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	info, err := os.Stat(filepath.Join(w.configDir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o640 {
+		t.Errorf("config.toml mode = %04o, want 0640", mode)
+	}
+	if got := ticket2ReadConfig(t, w); got != text {
+		t.Errorf("config.toml =\n%q\nwant it unchanged:\n%q", got, text)
+	}
+}
