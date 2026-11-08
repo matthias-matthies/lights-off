@@ -189,7 +189,7 @@ func (d *dashboard) Close() {
 // dashboardCommand names the command the page is running.
 func dashboardCommand(opts options) string {
 	switch {
-	case opts.plan:
+	case opts.verb == verbPlan:
 		return "lights-off plan " + opts.repo
 	case opts.n != 0:
 		return fmt.Sprintf("lights-off %s --n=%d", opts.repo, opts.n)

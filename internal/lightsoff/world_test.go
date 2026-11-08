@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -53,6 +54,8 @@ type world struct {
 	sbxConfigDir string
 	stateDir     string
 	config       string
+	configPerm   os.FileMode // its permissions; 0600 when zero
+	skipConfig   bool        // don't write config.toml before the run
 	secrets      string      // secrets.env, written unless skipSecrets
 	secretsPerm  os.FileMode // its permissions
 	skipSecrets  bool
@@ -210,8 +213,18 @@ func (w *world) run(args ...string) int {
 
 func (w *world) runWithExec(exec func(lightsoff.Command) (lightsoff.Result, error), args ...string) int {
 	w.t.Helper()
-	if err := os.WriteFile(filepath.Join(w.configDir, "config.toml"), []byte(w.config), 0o600); err != nil {
-		w.t.Fatal(err)
+	if !w.skipConfig {
+		path := filepath.Join(w.configDir, "config.toml")
+		if _, err := os.Stat(w.configDir); !errors.Is(err, fs.ErrNotExist) {
+			if err := os.WriteFile(path, []byte(w.config), 0o600); err != nil {
+				w.t.Fatal(err)
+			}
+			if w.configPerm != 0 {
+				if err := os.Chmod(path, w.configPerm); err != nil {
+					w.t.Fatal(err)
+				}
+			}
+		}
 	}
 	if !w.skipSecrets {
 		path := filepath.Join(w.configDir, "secrets.env")

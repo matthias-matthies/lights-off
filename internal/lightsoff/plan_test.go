@@ -131,7 +131,7 @@ func TestPlanRefusesWhenSecretsAreUnsafe(t *testing.T) {
 	w.assertStderrHas("0600")
 }
 
-func TestPlanForARepositoryNotOptedInIsRefusedWithTheLinesToAdd(t *testing.T) {
+func TestPlanForARepositoryNotOptedInIsRefusedWithTheCommandToOptItIn(t *testing.T) {
 	w := newWorld(t)
 	w.terminal = true
 	w.config = "[repos.\"owner/other\"]\nallowlist = [\"owner\"]\n"
@@ -139,7 +139,7 @@ func TestPlanForARepositoryNotOptedInIsRefusedWithTheLinesToAdd(t *testing.T) {
 	if code := w.run("plan", "owner/repo"); code == 0 {
 		t.Errorf("exit code = 0, want non-zero")
 	}
-	w.assertStderrHas(`[repos."owner/repo"]`)
+	w.assertStderrHas("lights-off repo add owner/repo")
 	if len(w.commands) != 0 {
 		t.Errorf("commands sent for a repository not opted in: %v", w.commands)
 	}

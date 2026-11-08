@@ -59,15 +59,18 @@ func TestVersionWithOtherArgumentsIsAnError(t *testing.T) {
 	}
 }
 
-func TestRepositoryNotInConfigIsRefusedWithTheLinesToAdd(t *testing.T) {
+func TestRepositoryNotInConfigIsRefusedWithTheCommandToOptItIn(t *testing.T) {
 	w := newWorld(t)
 	w.config = "[repos.\"owner/other\"]\nallowlist = [\"owner\"]\n"
 
 	if code := w.run("owner/repo", "--ticket=42"); code == 0 {
 		t.Fatalf("exit code = 0, want non-zero")
 	}
-	if !strings.Contains(w.stderr.String(), `[repos."owner/repo"]`) {
-		t.Errorf("stderr should print the lines to add, got %q", w.stderr.String())
+	if !strings.Contains(w.stderr.String(), "lights-off repo add owner/repo") {
+		t.Errorf("stderr should print the command to opt it in, got %q", w.stderr.String())
+	}
+	if strings.Contains(w.stderr.String(), `[repos."owner/repo"]`) {
+		t.Errorf("stderr should not print config lines, got %q", w.stderr.String())
 	}
 	if len(w.commands) != 0 {
 		t.Errorf("commands sent to a repository not opted in: %v", w.commands)

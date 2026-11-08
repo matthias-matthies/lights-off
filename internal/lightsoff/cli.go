@@ -19,6 +19,7 @@ import (
 const usage = `usage: lights-off <owner>/<repo> --ticket=<ticket> [--no-dashboard]
        lights-off <owner>/<repo> --n=<count> [--no-dashboard]
        lights-off plan <owner>/<repo> [--no-dashboard]
+       lights-off repo add <owner>/<repo>   opt in a repository
        lights-off --version`
 
 // Exit codes.
@@ -116,8 +117,16 @@ type autonomousRun struct {
 	hostCheckout *sync.Mutex
 }
 
+type verb int
+
+const (
+	verbRun verb = iota
+	verbPlan
+	verbRepoAdd
+)
+
 type options struct {
-	plan        bool
+	verb        verb
 	repo        string
 	ticket      int
 	n           int
@@ -145,6 +154,13 @@ func Run(args []string, env Env) int {
 		fmt.Fprintf(env.Stdout, "lights-off %s\n", version)
 		return exitOK
 	}
+	if opts.verb == verbRepoAdd {
+		if err := addRepo(opts.repo, env); err != nil {
+			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
+			return exitFailure
+		}
+		return exitOK
+	}
 
 	cfg, err := loadConfig(env.ConfigDir)
 	if err != nil {
@@ -152,12 +168,12 @@ func Run(args []string, env Env) int {
 		return exitFailure
 	}
 	if !cfg.optedIn(opts.repo) {
-		fmt.Fprintf(env.Stderr, "lights-off: %s is not opted in. To allow it, add these lines to %s:\n\n%s",
-			opts.repo, configPath(env.ConfigDir), configLinesFor(opts.repo))
+		fmt.Fprintf(env.Stderr, "lights-off: %s is not opted in. To opt it in, run:\n\n    lights-off repo add %s\n",
+			opts.repo, opts.repo)
 		return exitFailure
 	}
 
-	if opts.plan {
+	if opts.verb == verbPlan {
 		if err := openPlanningSession(opts.repo, cfg, env, !opts.noDashboard); err != nil {
 			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
 			return exitFailure
@@ -341,8 +357,24 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 		}
 		return opts, nil
 	}
+	if len(positionals) > 0 && positionals[0] == "repo" {
+		if set["ticket"] || set["n"] || set["no-dashboard"] {
+			return opts, errors.New("repo takes none of --ticket, --n or --no-dashboard")
+		}
+		switch {
+		case len(positionals) == 3 && positionals[1] == "add":
+			opts.verb = verbRepoAdd
+			opts.repo = positionals[2]
+		default:
+			return opts, errors.New("expected repo add <owner>/<repo>")
+		}
+		if !repoPattern.MatchString(opts.repo) {
+			return opts, errors.New("expected one <owner>/<repo>")
+		}
+		return opts, nil
+	}
 	if len(positionals) > 0 && positionals[0] == "plan" {
-		opts.plan = true
+		opts.verb = verbPlan
 		positionals = positionals[1:]
 		if set["ticket"] || set["n"] {
 			return opts, errors.New("plan takes neither --ticket nor --n")
