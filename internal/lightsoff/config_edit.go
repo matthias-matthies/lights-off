@@ -49,12 +49,9 @@ func readConfigText(dir string) (configText, error) {
 
 // withRepo returns the text with a new repository table appended after a blank
 // line. Everything already in the file is left byte-for-byte alone.
-func (c configText) withRepo(repo string) string {
-	nl := "\n"
-	if strings.HasSuffix(c.text, "\r\n") {
-		nl = "\r\n"
-	}
-	addition := fmt.Sprintf("[repos.%q]%sallowlist = []%s", repo, nl, nl)
+func (c configText) withRepo(repo string, allowlist []string) string {
+	nl := c.lineEnding()
+	addition := fmt.Sprintf("[repos.%q]%sallowlist = %s%s", repo, nl, formatAllowlist(allowlist), nl)
 	if c.text == "" {
 		return addition
 	}
@@ -66,6 +63,131 @@ func (c configText) withRepo(repo string) string {
 	default:
 		return c.text + nl + nl + addition
 	}
+}
+
+// withAllowlist returns the text with a repository's allowlist line set to
+// users. It changes only that line's value, keeping its indentation, spacing
+// and trailing comment, or inserts a line right after the table header when the
+// repository has none yet.
+func (c configText) withAllowlist(repo string, users []string) (string, error) {
+	lines := strings.SplitAfter(c.text, "\n")
+	header := -1
+	for i, line := range lines {
+		if r, secrets, ok := configTableHeader(line); ok && r == repo && !secrets {
+			header = i
+			break
+		}
+	}
+	if header < 0 {
+		return "", fmt.Errorf("config.toml has no [repos.%q] table", repo)
+	}
+	for i := header + 1; i < len(lines); i++ {
+		if _, _, ok := configTableHeader(lines[i]); ok {
+			break
+		}
+		if start, end, ok := allowlistValue(lines[i]); ok {
+			lines[i] = lines[i][:start] + formatAllowlist(users) + lines[i][end:]
+			return strings.Join(lines, ""), nil
+		}
+	}
+	line, ending := trimLineEnding(lines[header])
+	inserted := "allowlist = " + formatAllowlist(users)
+	if ending == "" {
+		lines[header] = line + c.lineEnding() + inserted
+	} else {
+		lines[header] = lines[header] + inserted + ending
+	}
+	return strings.Join(lines, ""), nil
+}
+
+// configTableHeader returns the repository and kind of a table header line.
+func configTableHeader(line string) (repo string, secrets bool, ok bool) {
+	content, _ := trimLineEnding(line)
+	p := &lineParser{rest: strings.TrimSpace(content)}
+	if !p.accept("[") {
+		return "", false, false
+	}
+	repo, secrets, err := p.table()
+	if err != nil {
+		return "", false, false
+	}
+	return repo, secrets, true
+}
+
+// allowlistValue returns the span of the array value on an allowlist line,
+// after any indentation and the "=". It handles "]" inside quoted strings.
+func allowlistValue(line string) (start, end int, ok bool) {
+	i := 0
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	if i == len(line) || line[i] == '#' || line[i] == '[' || line[i] == '\r' || line[i] == '\n' {
+		return 0, 0, false
+	}
+	eq := strings.IndexByte(line[i:], '=')
+	if eq < 0 {
+		return 0, 0, false
+	}
+	eq += i
+	if strings.TrimSpace(line[i:eq]) != "allowlist" {
+		return 0, 0, false
+	}
+	start = eq + 1
+	for start < len(line) && (line[start] == ' ' || line[start] == '\t') {
+		start++
+	}
+	if start == len(line) || line[start] != '[' {
+		return 0, 0, false
+	}
+	quoted := false
+	for j := start; j < len(line); j++ {
+		switch line[j] {
+		case '"':
+			quoted = !quoted
+		case ']':
+			if !quoted {
+				return start, j + 1, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+func formatAllowlist(users []string) string {
+	quoted := make([]string, len(users))
+	for i, user := range users {
+		quoted[i] = `"` + user + `"`
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+func trimLineEnding(line string) (content, ending string) {
+	switch {
+	case strings.HasSuffix(line, "\r\n"):
+		return line[:len(line)-2], "\r\n"
+	case strings.HasSuffix(line, "\n"):
+		return line[:len(line)-1], "\n"
+	default:
+		return line, ""
+	}
+}
+
+// lineEnding follows the file's own line endings, so an edit on a Windows file
+// doesn't mix them.
+func (c configText) lineEnding() string {
+	if i := strings.IndexByte(c.text, '\n'); i > 0 && c.text[i-1] == '\r' {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+// writeChecked parses an edit before writing it, so a config lights-off writes
+// is always one it can read back.
+func (c configText) writeChecked(text string) error {
+	if _, line, err := parseConfig(text); err != nil {
+		return fmt.Errorf("%s:%d: edited config.toml is invalid: %w", configPath(c.dir), line, err)
+	}
+	return c.write(text)
 }
 
 // write puts edited text in a temporary file in the same directory and renames

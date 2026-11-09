@@ -36,27 +36,27 @@ The binary isn't notarized. If you download it through a browser instead, clear 
 
 ## Setup
 
-Lights-off works only on repositories you opt in to. Opt one in with:
+Lights-off works only on repositories you opt in to. Opt one in with its first Allowlist users:
+
+```sh
+lights-off repo add owner/repo --allow=alice,bob
+```
+
+Or opt it in first and add users later:
 
 ```sh
 lights-off repo add owner/repo
+lights-off allowlist add owner/repo alice bob
 ```
 
-This creates or edits `~/.config/lights-off/config.toml`, keeping your comments, blank lines and other settings, and adds:
+These commands create or edit `~/.config/lights-off/config.toml`, keeping your comments, blank lines and other settings. The first adds:
 
 ```toml
 [repos."owner/repo"]
-allowlist = []
+allowlist = ["alice", "bob"]   # whose ready-for-agent labels count
 ```
 
-An `--n` run picks up nothing until someone is on the Allowlist. Add them by hand, since the CLI doesn't edit Allowlists yet:
-
-```toml
-[repos."owner/repo"]
-allowlist = ["your-github-user"]   # whose ready-for-agent labels count
-```
-
-`--ticket` still works with an empty Allowlist, after you confirm the override.
+Running `repo add --allow=carol` on a repository that is already opted in adds the users it names that are missing, so the command from a refusal is safe to re-run. An `--n` run picks up nothing until someone is on the Allowlist. `--ticket` still works with an empty Allowlist, after you confirm the override.
 
 The file stays the reference for hand-editing and for settings the CLI doesn't cover, such as `implementer_memory` and repository secrets:
 
@@ -77,7 +77,7 @@ Secrets go in `~/.config/lights-off/secrets.env`, which must have mode `600`:
 | `GITHUB_TOKEN` | Implementer, Planning Session, and lights-off itself for merging |
 | `GITHUB_REVIEWER_TOKEN` (read-only) | Reviewer |
 
-If anything is missing, lights-off refuses to start and says what to add: for a repository that isn't opted in, it prints the `lights-off repo add <owner>/<repo>` command.
+If anything is missing, lights-off refuses to start and says what to add: for a repository that isn't opted in, it prints the `lights-off repo add <owner>/<repo> --allow=<your-github-username>` command.
 
 An `--n` run only picks up tickets whose `ready-for-agent` label was added by someone on the allowlist. Agents see only a ticket's main text, never its comments.
 
