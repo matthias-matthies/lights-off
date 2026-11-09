@@ -102,6 +102,7 @@ type world struct {
 	implementerPasses []agentPass // one per pass; the outputs above answer once these run out
 	implementerFiles  [][]string  // the files each Implementer pass leaves in its sandbox; the last repeats
 	reviewerPasses    []agentPass // likewise, one per Reviewer
+	createFails       int         // sbx create fails this many times before it works
 	heads             []string    // the pull request's head after each Implementer pass; the last repeats
 	conflictedPasses  int         // the pull request conflicts until an Implementer pass after this many
 	conflictAtMerge   bool        // the base moves during review: the first merge fails on a new conflict
@@ -602,6 +603,10 @@ func (w *world) sbx(c lightsoff.Command) lightsoff.Result {
 		}
 		return ok(strings.Join(names, "\n"))
 	case "create":
+		if w.createFails > 0 {
+			w.createFails--
+			return lightsoff.Result{Stderr: "error: failed to apply kit to sandbox", ExitCode: 1}
+		}
 		// The agent is sbx's built-in claude or a local kit.
 		kit := args[len(args)-2]
 		if _, err := os.Stat(filepath.Join(kit, "spec.yaml")); kit != "claude" && err != nil {
@@ -612,6 +617,8 @@ func (w *world) sbx(c lightsoff.Command) lightsoff.Result {
 			data, _ := os.ReadFile(filepath.Join(w.sbxConfigDir, "credentials.yaml"))
 			w.bindingsAtCreate = string(data)
 		}
+		// A name removed earlier can be created again, as with the real sbx.
+		delete(w.gone, flagValue(args, "--name"))
 		w.sandboxes = append(w.sandboxes, flagValue(args, "--name"))
 		w.clonedFrom[flagValue(args, "--name")] = w.checkoutHead
 		return ok("")

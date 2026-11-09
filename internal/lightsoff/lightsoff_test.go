@@ -167,7 +167,7 @@ func TestReviewerRunsInANewSandboxOnThePullRequestWithItsFixedPointAndTicket(t *
 	w.run("owner/repo", "--ticket=42")
 
 	create := w.calls("sbx", "create")[1].Args
-	if !slices.Contains(create, "--clone") || flagValue(create, "--memory") != "1g" {
+	if !slices.Contains(create, "--clone") || flagValue(create, "--memory") != "2g" {
 		t.Errorf("reviewer sandbox create = %v", create)
 	}
 	// A clone sandbox starts at the host checkout's HEAD, so the checkout must

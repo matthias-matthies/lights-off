@@ -1,6 +1,7 @@
 package lightsoff_test
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -162,7 +163,10 @@ func TestACrashUsesAnIterationAndTheNextPassIsToldWhy(t *testing.T) {
 		})
 	}
 
-	reviewerCases := map[string]struct {
+}
+
+func TestACrashedReviewerIsReplacedOnTheSameCommitWithoutAnIteration(t *testing.T) {
+	cases := map[string]struct {
 		pass agentPass
 		want string
 	}{
@@ -172,25 +176,25 @@ func TestACrashUsesAnIterationAndTheNextPassIsToldWhy(t *testing.T) {
 		"no JSON":        {agentPass{output: "Ship it."}, "no JSON object"},
 		"invalid":        {agentPass{output: `{"mergeable":"true","risk":"low","update":"two-way","reason":"x"}`}, "invalid verdict"},
 	}
-	for name, c := range reviewerCases {
-		t.Run("reviewer: "+name, func(t *testing.T) {
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
 			w.reviewerPasses = []agentPass{c.pass}
 
 			if code := w.run("owner/repo", "--ticket=42"); code != 0 {
 				t.Fatalf("exit code = %d\nstdout:\n%s", code, w.stdout.String())
 			}
-			prompts := w.prompts(w.sandboxes[0])
-			if len(prompts) != 2 {
-				t.Fatalf("implementer passes = %d, want 2", len(prompts))
-			}
-			for _, want := range []string{"Reviewer crashed", c.want, "#7"} {
-				if !strings.Contains(prompts[1], want) {
-					t.Errorf("next pass not told %q:\n%s", want, prompts[1])
-				}
+			if got := len(w.prompts(w.sandboxes[0])); got != 1 {
+				t.Errorf("implementer passes = %d, want 1: it has nothing to fix", got)
 			}
 			if len(w.sandboxes) != 3 {
-				t.Errorf("sandboxes = %v, want a new Reviewer for the second pass", w.sandboxes)
+				t.Fatalf("sandboxes = %v, want a fresh Reviewer after the crash", w.sandboxes)
+			}
+			if w.clonedFrom[w.sandboxes[2]] != headSHA {
+				t.Errorf("second Reviewer cloned %q, want the same commit %q", w.clonedFrom[w.sandboxes[2]], headSHA)
+			}
+			if !strings.Contains(w.sandboxes[2], "-reviewer-2-") {
+				t.Errorf("second Reviewer's sandbox = %q, want it numbered 2", w.sandboxes[2])
 			}
 			if len(w.overlaps) != 0 {
 				t.Errorf("running beside an agent: %v", w.overlaps)
@@ -198,8 +202,33 @@ func TestACrashUsesAnIterationAndTheNextPassIsToldWhy(t *testing.T) {
 			if got := w.calls("gh", "pr", "comment", "7"); len(got) != 1 {
 				t.Errorf("verdicts posted = %d, want only the one that parsed", len(got))
 			}
+			if got := len(w.calls("gh", "pr", "merge")); got != 1 {
+				t.Errorf("merges = %d, want the second Reviewer's verdict to merge", got)
+			}
+			w.assertEventOnce(`^#42 reviewer crashed, so a fresh one reviews the same commit: .*` + regexp.QuoteMeta(c.want))
+			if strings.Contains(w.stdout.String(), "handed back") {
+				t.Errorf("a Reviewer crash handed back:\n%s", w.stdout.String())
+			}
 		})
 	}
+}
+
+func TestAReviewerThatCrashesAgainStopsAtAPerson(t *testing.T) {
+	w := newWorld(t)
+	w.reviewerPasses = []agentPass{{exit: 137}, {output: "Ship it."}}
+
+	if code := w.run("owner/repo", "--ticket=42"); code != 0 {
+		t.Fatalf("exit code = %d\nstdout:\n%s", code, w.stdout.String())
+	}
+	if got := len(w.prompts(w.sandboxes[0])); got != 1 {
+		t.Errorf("implementer passes = %d, want 1", got)
+	}
+	if got := len(w.calls("sbx", "create")); got != 3 {
+		t.Errorf("sandboxes = %v, want one Implementer and two Reviewers", w.sandboxes)
+	}
+	w.assertNoMerge()
+	w.assertSandboxesKept()
+	w.assertEventOnce(`^#42 ready for human: pull request #7 stays open: 2 Reviewers crashed on the same commit, the last one: .*no JSON object`)
 }
 
 func TestAgentsRunUnderTheSixtyMinuteLimitAndOnlyAgents(t *testing.T) {
@@ -242,15 +271,80 @@ func TestAgentPastTheLimitIsStoppedBeforeAnythingElseHappens(t *testing.T) {
 	})
 }
 
-func TestSbxFailingUnderAnAgentIsAToolFailureNotACrash(t *testing.T) {
+func TestSbxFailingUnderAnAgentIsTriedAgainAfterAPause(t *testing.T) {
 	w := newWorld(t)
-	w.implementerPasses = []agentPass{{exit: 125, stderr: "sbx: daemon not running"}}
+	w.implementerPasses = []agentPass{{exit: 125, stderr: "503 Service Unavailable: the host is not fully awake"}}
+	start := w.now
+
+	if code := w.run("owner/repo", "--ticket=42"); code != 0 {
+		t.Fatalf("exit code = %d\nstdout:\n%s", code, w.stdout.String())
+	}
+	if got := len(w.prompts(w.sandboxes[0])); got != 2 {
+		t.Errorf("implementer runs = %d, want the failed one tried again", got)
+	}
+	if w.now.Sub(start) < 30*time.Second {
+		t.Errorf("tried again after %v, want a pause first", w.now.Sub(start))
+	}
+	if got := len(w.calls("gh", "pr", "merge")); got != 1 {
+		t.Errorf("merges = %d, want the run to carry on", got)
+	}
+}
+
+func TestAFailedSandboxCreateIsCleanedUpAndTriedAgain(t *testing.T) {
+	w := newWorld(t)
+	w.createFails = 2
+
+	if code := w.run("owner/repo", "--ticket=42"); code != 0 {
+		t.Fatalf("exit code = %d\nstdout:\n%s", code, w.stdout.String())
+	}
+	creates := w.calls("sbx", "create")
+	if len(creates) != 4 {
+		t.Fatalf("creates = %d, want two failed and then one per agent", len(creates))
+	}
+	name := flagValue(creates[0].Args, "--name")
+	if flagValue(creates[2].Args, "--name") != name {
+		t.Errorf("retried create used a new name: %v", creates[2].Args)
+	}
+	removed := 0
+	for _, c := range w.commands {
+		if c.Name == "sbx" && c.Args[0] == "rm" && slices.Contains(c.Args, name) {
+			removed++
+		}
+		if c.Name == "sbx" && c.Args[0] == "exec" {
+			break // the create that worked came before the first agent ran
+		}
+	}
+	if removed != 2 {
+		t.Errorf("removals of %s before it worked = %d, want one after each failed create", name, removed)
+	}
+	if got := len(w.calls("gh", "pr", "merge")); got != 1 {
+		t.Errorf("merges = %d, want the run to carry on", got)
+	}
+}
+
+func TestAFailedSandboxCreateEveryTimeStopsTheTicket(t *testing.T) {
+	w := newWorld(t)
+	w.createFails = 3
 
 	if code := w.run("owner/repo", "--ticket=42"); code == 0 {
 		t.Errorf("exit code = 0, want non-zero")
 	}
-	if got := len(w.prompts(w.sandboxes[0])); got != 1 {
-		t.Errorf("implementer passes = %d, want no Iteration spent on it", got)
+	if got := len(w.calls("sbx", "create")); got != 3 {
+		t.Errorf("creates = %d, want three tries", got)
+	}
+	w.assertEventOnce(`^#42 stopped: sbx create exited 1: error: failed to apply kit to sandbox`)
+}
+
+func TestSbxFailingUnderAnAgentEveryTimeIsAToolFailureNotACrash(t *testing.T) {
+	w := newWorld(t)
+	failing := agentPass{exit: 125, stderr: "sbx: daemon not running"}
+	w.implementerPasses = []agentPass{failing, failing, failing}
+
+	if code := w.run("owner/repo", "--ticket=42"); code == 0 {
+		t.Errorf("exit code = 0, want non-zero")
+	}
+	if got := len(w.prompts(w.sandboxes[0])); got != 3 {
+		t.Errorf("implementer runs = %d, want three tries and no Iteration spent on them", got)
 	}
 	w.assertNotMovedToReadyForHuman()
 	w.assertSandboxesKept()

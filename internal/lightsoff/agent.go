@@ -72,7 +72,9 @@ The pull request is checked out at HEAD. Use the code-review skill with these in
 - Fixed point: %[3]s
 - Spec: the ticket below
 
-Do not merge, push or comment. Lights-off decides on the merge from your answer. Judge the code yourself: do not rely on the pull request's description or its Merge Danger section.
+Do not merge, push or comment. Lights-off decides on the merge from your answer.
+
+Lights-off reads only your last message. If you start sub-agents, wait until every one has finished before you give your final answer. If anything makes you write another message after it, end that message with the JSON object again. Judge the code yourself: do not rely on the pull request's description or its Merge Danger section.
 
 End your final answer with only a JSON object:
 {"mergeable": true or false, "risk": "low" or "medium" or "high", "update": "two-way" or "one-way", "reason": "<one sentence saying whether it should merge and why you chose that risk>"}

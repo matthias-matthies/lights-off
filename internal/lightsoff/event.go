@@ -35,6 +35,7 @@ const (
 	EventCIGreen             EventKind = "ci-green"
 	EventCIAbsent            EventKind = "ci-absent"
 	EventReviewerStarted     EventKind = "reviewer-started"
+	EventReviewerRetried     EventKind = "reviewer-retried"
 	EventVerdict             EventKind = "verdict"
 	EventHandedBack          EventKind = "handed-back"
 	EventMerged              EventKind = "merged"
@@ -108,6 +109,8 @@ func (e Event) statusLine() string {
 		return "no CI: counted as green, so the Verdict alone decides"
 	case EventReviewerStarted:
 		return "reviewer started in sandbox " + e.Sandbox
+	case EventReviewerRetried:
+		return "reviewer crashed, so a fresh one reviews the same commit: " + e.Reason
 	case EventVerdict:
 		if e.Verdict == nil {
 			return "verdict: unknown"

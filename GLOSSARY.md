@@ -31,7 +31,7 @@ The end of an Iteration with a problem the Implementer can fix, passed to its ne
 _Avoid_: Retry, rejection
 
 **Tool failure**:
-Lights-off itself could not continue, as opposed to an agent or a pull request falling short. It stops the Autonomous Run with a non-zero exit code and uses no Iteration.
+Lights-off itself could not continue, as opposed to an agent or a pull request falling short. It stops the Autonomous Run with a non-zero exit code and uses no Iteration. A failed sbx step is first tried again twice, after a pause, because sbx can fail for a while, for example while the host wakes up.
 _Avoid_: Crash, error
 
 ### Ticket Attempt phases
@@ -83,7 +83,7 @@ The agent that works a ticket through to an open pull request.
 _Avoid_: Worker, coder
 
 **Reviewer**:
-A fresh agent, separate from the Implementer, that judges a pull request and returns a Verdict.
+A fresh agent, separate from the Implementer, that judges a pull request and returns a Verdict. A Reviewer that crashes is no Hand-back, because the Implementer has nothing to fix: a fresh Reviewer judges the same commit, and if it crashes too, the ticket goes to a person.
 _Avoid_: Orchestrator, final gate
 
 ### Merging

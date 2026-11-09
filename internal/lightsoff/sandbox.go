@@ -12,7 +12,10 @@ import (
 // sandbox 50% of host memory.
 const (
 	implementerMemory = "2g"
-	reviewerMemory    = "1g"
+	// reviewerMemory matches the Implementer's, because the Reviewer runs the
+	// same tests: at 1g it was killed doing so. It runs while the Implementer's
+	// sandbox is stopped, so it adds nothing to a ticket's peak.
+	reviewerMemory = "2g"
 	// planningMemory is for Claude Code, which a person drives with nothing
 	// else of lights-off running beside it.
 	planningMemory = "4g"
@@ -117,6 +120,12 @@ const (
 	exitKilled    = 137 // SIGKILL, which in a memory-capped sandbox is the OOM killer
 )
 
+// sbxFailed is sbx failing before the agent could run, so it says nothing about
+// the work and trying again can help.
+type sbxFailed struct{ message string }
+
+func (e sbxFailed) Error() string { return e.message }
+
 // runAgent runs one headless dsh turn and returns its final answer. A crash comes
 // back as a handBack naming the agent. The approval flags are load-bearing:
 // without them a headless dsh silently fails writes outside the workspace and
@@ -151,7 +160,7 @@ func (s sandboxes) runAgent(sb *sandbox, agent, prompt, logPath string) (string,
 		}
 		return "", crashed(agent, fmt.Sprintf("it passed the %.0f-minute limit and was stopped", agentLimit.Minutes()))
 	case res.ExitCode == sbxExecFailed:
-		return "", fmt.Errorf("sbx exec exited %d: %s", res.ExitCode, lastLine(res.Stderr))
+		return "", sbxFailed{fmt.Sprintf("sbx exec exited %d: %s", res.ExitCode, lastLine(res.Stderr))}
 	case res.ExitCode == exitKilled:
 		return "", crashed(agent, fmt.Sprintf("it was killed, most likely out of memory (exit %d)", res.ExitCode))
 	case res.ExitCode != 0:
