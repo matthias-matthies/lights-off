@@ -94,7 +94,7 @@ func TestImplementerMemoryOverrideReachesItsSandboxOnly(t *testing.T) {
 		}
 		got[role] = flagValue(c.Args, "--memory")
 	}
-	if want := map[string]string{"implementer": "4g", "reviewer": "1g"}; !maps.Equal(got, want) {
+	if want := map[string]string{"implementer": "4g", "reviewer": "2g"}; !maps.Equal(got, want) {
 		t.Errorf("memory limits = %v, want %v", got, want)
 	}
 }
@@ -257,8 +257,8 @@ func TestEachSandboxClonesItsOwnTicketsStartWhenTicketsRunAtOnce(t *testing.T) {
 func TestStartLineNamesEachTicketsPeakMemory(t *testing.T) {
 	w := newWorld(t)
 	w.config += "implementer_memory = \"512m\"\n"
-	w.hostMemory = 4 << 30
+	w.hostMemory = 8 << 30
 	w.run("owner/repo", "--n=5")
-	// The Reviewer's 1g is the larger, because the Implementer's is stopped while it runs.
-	w.assertEventOnce(`^lights-off: up to 3 tickets at once: 75% of 4.0 GB host memory at 1g each`)
+	// The Reviewer's 2g is the larger, because the Implementer's is stopped while it runs.
+	w.assertEventOnce(`^lights-off: up to 3 tickets at once: 75% of 8.0 GB host memory at 2g each`)
 }

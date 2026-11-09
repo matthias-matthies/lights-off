@@ -52,6 +52,18 @@ func mergeGate(ci ciState, v Verdict) gateDecision {
 // maxIterations is how many Iterations one Ticket Attempt may use.
 const maxIterations = 3
 
+// reviewerTries is how many Reviewers may judge one commit. A Reviewer that
+// crashes says nothing about the work, so a fresh one judges the same commit
+// rather than the Implementer being sent back with nothing to fix.
+const reviewerTries = 2
+
+// sbx fails now and then for reasons outside the work, such as a host that is
+// still waking up, so a failed sandbox step is tried again after a pause.
+const (
+	sbxTries      = 3
+	sbxRetryDelay = 30 * time.Second
+)
+
 // handBack ends an Iteration with something the Implementer can act on. Any
 // other error means lights-off itself failed.
 type handBack struct{ reason string }
@@ -84,6 +96,7 @@ type attempt struct {
 
 	sandboxes   []*sandbox // created so far, in order
 	implementer *sandbox   // kept across Iterations
+	reviewers   int        // Reviewers started so far, which numbers their sandboxes and logs
 	pr          int        // the pull request for this ticket, once one has checked out
 	handedBack  string     // why the last Iteration went back to the Implementer
 }
@@ -328,6 +341,10 @@ func (a *attempt) runIteration(iteration int) (ending, error) {
 	// what the Reviewer judges, and the only head the merge will accept.
 	sha := pr.HeadRefOid
 	v, err := a.runReviewer(iteration, pr, sha)
+	if crash, ok := errors.AsType[reviewerCrash](err); ok {
+		// The Implementer can't fix a Reviewer that keeps crashing.
+		return a.stopAtPerson(crash.Error())
+	}
 	if err != nil {
 		return ending{}, err
 	}
@@ -475,9 +492,9 @@ func (a *attempt) readOpenPullRequest(number int, defaultBranch string) (pullReq
 
 // startSandbox creates a sandbox from the host checkout once moveCheckout has
 // put it where the sandbox should start.
-func (a *attempt) startSandbox(role, memory string, iteration int, grants []grant, repoSecrets []repoSecret, moveCheckout func() error) (*sandbox, error) {
-	name := sandboxName(a.repo, a.number, role, iteration, a.env.Clock.Now())
-	if err := a.createFromCheckout(name, memory, moveCheckout); err != nil {
+func (a *attempt) startSandbox(role, memory string, number int, grants []grant, repoSecrets []repoSecret, moveCheckout func() error) (*sandbox, error) {
+	name := sandboxName(a.repo, a.number, role, number, a.env.Clock.Now())
+	if err := a.createWithRetries(name, memory, moveCheckout); err != nil {
 		return nil, err
 	}
 	created := &sandbox{name: name}
@@ -491,6 +508,30 @@ func (a *attempt) startSandbox(role, memory string, iteration int, grants []gran
 	}
 	a.report.emit(Event{Kind: kind, Sandbox: name})
 	return created, nil
+}
+
+// createWithRetries removes what a failed create may have left before trying
+// again, because it would hold the name.
+func (a *attempt) createWithRetries(name, memory string, moveCheckout func() error) error {
+	for try := 1; ; try++ {
+		err := a.createFromCheckout(name, memory, moveCheckout)
+		if err == nil || errors.Is(err, errInterrupted) || try == sbxTries {
+			return err
+		}
+		a.sh.run("sbx", "rm", "--force", name) // nothing may be there to remove
+		a.env.Clock.Sleep(sbxRetryDelay)
+	}
+}
+
+// runAgent tries again when sbx failed before the agent ran.
+func (a *attempt) runAgent(sb *sandbox, agent, prompt, logPath string) (string, error) {
+	for try := 1; ; try++ {
+		answer, err := a.driver.runAgent(sb, agent, prompt, logPath)
+		if _, failed := errors.AsType[sbxFailed](err); !failed || try == sbxTries {
+			return answer, err
+		}
+		a.env.Clock.Sleep(sbxRetryDelay)
+	}
 }
 
 func (a *attempt) createFromCheckout(name, memory string, moveCheckout func() error) error {
@@ -539,7 +580,7 @@ func (a *attempt) runImplementer(iteration int) (implementerResult, error) {
 		a.report.emit(Event{Kind: EventImplementerResumed, Sandbox: a.implementer.name})
 		prompt = handBackPrompt(a.repo, a.ticket, a.pr, a.handedBack)
 	}
-	answer, err := a.driver.runAgent(a.implementer, "Implementer", prompt, a.agentLog("implementer", iteration))
+	answer, err := a.runAgent(a.implementer, "Implementer", prompt, a.agentLog("implementer", iteration))
 	if err != nil {
 		return implementerResult{}, err
 	}
@@ -555,9 +596,31 @@ func (a *attempt) agentLog(role string, iteration int) string {
 	return filepath.Join(a.logDir, fmt.Sprintf("%d-%s-%d.log", a.number, role, iteration))
 }
 
-// runReviewer always uses a new sandbox, so that its judgement stays independent
-// of earlier reviews.
+// reviewerCrash is every Reviewer of one commit having crashed.
+type reviewerCrash struct{ reason string }
+
+func (c reviewerCrash) Error() string {
+	return fmt.Sprintf("%d Reviewers crashed on the same commit, the last one: %s", reviewerTries, c.reason)
+}
+
+// runReviewer has a fresh Reviewer judge the commit again when one crashes.
 func (a *attempt) runReviewer(iteration int, pr pullRequest, sha string) (Verdict, error) {
+	for try := 1; ; try++ {
+		v, err := a.reviewOnce(iteration, pr, sha)
+		back, crashed := errors.AsType[handBack](err)
+		if !crashed {
+			return v, err
+		}
+		if try == reviewerTries {
+			return Verdict{}, reviewerCrash{back.reason}
+		}
+		a.report.emit(Event{Kind: EventReviewerRetried, Reason: back.reason})
+	}
+}
+
+// reviewOnce always uses a new sandbox, so that its judgement stays independent
+// of earlier reviews.
+func (a *attempt) reviewOnce(iteration int, pr pullRequest, sha string) (Verdict, error) {
 	a.report.setPhase(PhaseReviewing)
 	a.report.setIteration(iteration)
 	var fixedPoint string
@@ -565,11 +628,12 @@ func (a *attempt) runReviewer(iteration int, pr pullRequest, sha string) (Verdic
 		fixedPoint, err = a.checkout.moveToPullRequest(pr, sha)
 		return err
 	}
-	created, err := a.startSandbox("reviewer", reviewerMemory, iteration, reviewerGrants, nil, toPullRequest)
+	a.reviewers++
+	created, err := a.startSandbox("reviewer", reviewerMemory, a.reviewers, reviewerGrants, nil, toPullRequest)
 	if err != nil {
 		return Verdict{}, err
 	}
-	answer, err := a.driver.runAgent(created, "Reviewer", reviewerPrompt(a.repo, a.ticket, pr, fixedPoint), a.agentLog("reviewer", iteration))
+	answer, err := a.runAgent(created, "Reviewer", reviewerPrompt(a.repo, a.ticket, pr, fixedPoint), a.agentLog("reviewer", a.reviewers))
 	var back handBack
 	if err != nil && !errors.As(err, &back) {
 		return Verdict{}, err
