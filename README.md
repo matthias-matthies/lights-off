@@ -58,6 +58,14 @@ allowlist = ["alice", "bob"]   # whose ready-for-agent labels count
 
 Running `repo add --allow=carol` on a repository that is already opted in adds the users it names that are missing, so the command from a refusal is safe to re-run. An `--n` run picks up nothing until someone is on the Allowlist. `--ticket` still works with an empty Allowlist, after you confirm the override.
 
+To take users off a Target Repository's Allowlist, run:
+
+```sh
+lights-off allowlist remove owner/repo alice bob
+```
+
+Names match ignoring case, so `Alice` removes an entry stored as `alice`. If any user isn't on the Allowlist, the command names them and changes nothing. Removing the last user leaves `allowlist = []`.
+
 To opt a Target Repository out, run:
 
 ```sh

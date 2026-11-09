@@ -23,6 +23,7 @@ const usage = `usage: lights-off <owner>/<repo> --ticket=<ticket> [--no-dashboar
        lights-off repo remove <owner>/<repo>                     opt out a repository
        lights-off repo list                                      show Target Repositories and their Allowlists
        lights-off allowlist add <owner>/<repo> <user>...         add users to a Target Repository's Allowlist
+       lights-off allowlist remove <owner>/<repo> <user>...      remove users from a Target Repository's Allowlist
        lights-off --version`
 
 // Exit codes.
@@ -129,6 +130,7 @@ const (
 	verbRepoRemove
 	verbRepoList
 	verbAllowlistAdd
+	verbAllowlistRemove
 )
 
 type options struct {
@@ -138,7 +140,7 @@ type options struct {
 	n           int
 	noDashboard bool
 	version     bool
-	allowlist   []string // for repo add --allow
+	allowlist   []string // for repo add --allow, allowlist add and allowlist remove
 }
 
 // Run executes the command line in args and returns the process exit code.
@@ -182,6 +184,12 @@ func Run(args []string, env Env) int {
 		return exitOK
 	case verbAllowlistAdd:
 		if err := addAllowlistUsers(opts.repo, opts.allowlist, env); err != nil {
+			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
+			return exitFailure
+		}
+		return exitOK
+	case verbAllowlistRemove:
+		if err := removeAllowlistUsers(opts.repo, opts.allowlist, env); err != nil {
 			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
 			return exitFailure
 		}
@@ -466,11 +474,12 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 			return opts, errors.New("allowlist takes none of --ticket, --n or --no-dashboard")
 		}
 		if set["allow"] {
-			return opts, errors.New("allowlist add takes users as arguments, not --allow")
+			return opts, errors.New("allowlist takes users as arguments, not --allow")
 		}
 		switch {
-		case len(positionals) >= 4 && positionals[1] == "add":
-			opts.verb = verbAllowlistAdd
+		case len(positionals) >= 4 && positionals[1] == "add",
+			len(positionals) >= 4 && positionals[1] == "remove":
+			opts.verb = map[string]verb{"add": verbAllowlistAdd, "remove": verbAllowlistRemove}[positionals[1]]
 			opts.repo = positionals[2]
 			if !repoPattern.MatchString(opts.repo) {
 				return opts, errors.New("expected one <owner>/<repo>")
@@ -480,7 +489,7 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 				return opts, err
 			}
 		default:
-			return opts, errors.New("expected allowlist add <owner>/<repo> <user>...")
+			return opts, errors.New("expected allowlist add <owner>/<repo> <user>... or allowlist remove <owner>/<repo> <user>...")
 		}
 		return opts, nil
 	}
