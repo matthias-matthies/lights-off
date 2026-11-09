@@ -20,8 +20,9 @@ const usage = `usage: lights-off <owner>/<repo> --ticket=<ticket> [--no-dashboar
        lights-off <owner>/<repo> --n=<count> [--no-dashboard]
        lights-off plan <owner>/<repo> [--no-dashboard]
        lights-off repo add <owner>/<repo> [--allow=<user>,...]   opt in a repository
-       lights-off repo list                show Target Repositories and their Allowlists
-       lights-off allowlist add <owner>/<repo> <user>...   add users to a Target Repository's Allowlist
+       lights-off repo remove <owner>/<repo>                     opt out a repository
+       lights-off repo list                                      show Target Repositories and their Allowlists
+       lights-off allowlist add <owner>/<repo> <user>...         add users to a Target Repository's Allowlist
        lights-off --version`
 
 // Exit codes.
@@ -125,6 +126,7 @@ const (
 	verbRun verb = iota
 	verbPlan
 	verbRepoAdd
+	verbRepoRemove
 	verbRepoList
 	verbAllowlistAdd
 )
@@ -162,6 +164,12 @@ func Run(args []string, env Env) int {
 	switch opts.verb {
 	case verbRepoAdd:
 		if err := addRepo(opts.repo, opts.allowlist, env); err != nil {
+			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
+			return exitFailure
+		}
+		return exitOK
+	case verbRepoRemove:
+		if err := removeRepo(opts.repo, env); err != nil {
 			fmt.Fprintf(env.Stderr, "lights-off: %v\n", err)
 			return exitFailure
 		}
@@ -425,6 +433,7 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 				return opts, errors.New("repo list takes no --allow")
 			}
 			opts.verb = verbRepoList
+			return opts, nil
 		case len(positionals) == 3 && positionals[1] == "add":
 			opts.verb = verbRepoAdd
 			opts.repo = positionals[2]
@@ -438,8 +447,17 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 				}
 				opts.allowlist = users
 			}
+		case len(positionals) == 3 && positionals[1] == "remove":
+			if set["allow"] {
+				return opts, errors.New("repo remove takes no --allow")
+			}
+			opts.verb = verbRepoRemove
+			opts.repo = positionals[2]
+			if !repoPattern.MatchString(opts.repo) {
+				return opts, errors.New("expected one <owner>/<repo>")
+			}
 		default:
-			return opts, errors.New("expected repo add <owner>/<repo> [--allow=<user>,...] or repo list")
+			return opts, errors.New("expected repo add <owner>/<repo> [--allow=<user>,...], repo remove <owner>/<repo> or repo list")
 		}
 		return opts, nil
 	}

@@ -65,6 +65,56 @@ func (c configText) withRepo(repo string, allowlist []string) string {
 	}
 }
 
+// withoutRepo returns the text with the repository's table and its .secrets
+// table removed, and the lines that were removed. Each table goes from its
+// header up to the next table header, with the blank lines that separated it
+// from what follows. Comment lines right above the next table's header stay,
+// because they describe that table. Everything before the removed header is
+// left alone, except that removing the last table also drops the blank lines
+// that separated it from the one above, so the file doesn't end in them.
+func (c configText) withoutRepo(repo string) (string, string) {
+	lines := strings.SplitAfter(c.text, "\n")
+	var kept []string
+	var removed strings.Builder
+	for i := 0; i < len(lines); {
+		header, _, ok := configTableHeader(lines[i])
+		if !ok || header != repo {
+			kept = append(kept, lines[i])
+			i++
+			continue
+		}
+		next := i + 1
+		for next < len(lines) {
+			if _, _, ok := configTableHeader(lines[next]); ok {
+				break
+			}
+			next++
+		}
+		end := next
+		if next < len(lines) {
+			if r, _, _ := configTableHeader(lines[next]); r != repo {
+				for end > i+1 && isCommentLine(lines[end-1]) {
+					end--
+				}
+			}
+		}
+		for _, line := range lines[i:end] {
+			removed.WriteString(line)
+		}
+		if next == len(lines) {
+			for len(kept) > 0 && isBlankLine(kept[len(kept)-1]) {
+				kept = kept[:len(kept)-1]
+			}
+		}
+		i = end
+	}
+	return strings.Join(kept, ""), removed.String()
+}
+
+func isBlankLine(line string) bool { return strings.TrimSpace(line) == "" }
+
+func isCommentLine(line string) bool { return strings.HasPrefix(strings.TrimSpace(line), "#") }
+
 // withAllowlist returns the text with a repository's allowlist line set to
 // users. It changes only that line's value, keeping its indentation, spacing
 // and trailing comment, or inserts a line right after the table header when the
