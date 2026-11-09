@@ -322,7 +322,7 @@ func TestTicket4AllowlistCommandsRejectRunFlagsAndUsageErrors(t *testing.T) {
 	cases := map[string][]string{
 		"allowlist with no users":        {"allowlist", "add", "owner/repo"},
 		"allowlist with no repository":   {"allowlist", "add"},
-		"allowlist unknown subcommand":   {"allowlist", "remove", "owner/repo", "alice"},
+		"allowlist unknown subcommand":   {"allowlist", "rename", "owner/repo", "alice"},
 		"allowlist with n":               {"allowlist", "add", "owner/repo", "alice", "--n=5"},
 		"allowlist with ticket":          {"allowlist", "add", "owner/repo", "alice", "--ticket=42"},
 		"allowlist with no-dashboard":    {"allowlist", "add", "owner/repo", "alice", "--no-dashboard"},

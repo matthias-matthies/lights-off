@@ -86,12 +86,69 @@ func addAllowlistUsers(repo string, users []string, env Env) error {
 	return nil
 }
 
+// removeAllowlistUsers removes users from an opted-in repository's Allowlist,
+// matching ignoring case. Every user must be on it, or nothing is written. It
+// only edits config: it sends no commands and needs no secrets.
+func removeAllowlistUsers(repo string, users []string, env Env) error {
+	if err := validateUserLogins(users); err != nil {
+		return err
+	}
+	c, err := readConfigText(env.ConfigDir)
+	if err != nil {
+		return err
+	}
+	if !c.cfg.optedIn(repo) {
+		return errors.New(notOptedInMessage(repo))
+	}
+	kept, removed, missing := dropUsers(c.cfg.repos[repo].allowlist, users)
+	if len(missing) > 0 {
+		return fmt.Errorf("%s not on the Allowlist of %s, so nothing was removed", subjectIs(missing), repo)
+	}
+	edited, err := c.withAllowlist(repo, kept)
+	if err != nil {
+		return err
+	}
+	if err := c.writeChecked(edited); err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Stdout, "lights-off: removed %s from the Allowlist.\n", strings.Join(removed, ", "))
+	warnIfAllowlistEmpty(env, kept)
+	return nil
+}
+
+// dropUsers takes the named users off the Allowlist, comparing ignoring case.
+// removed holds the entries as they were stored; missing holds the names that
+// matched nothing.
+func dropUsers(existing, users []string) (kept, removed, missing []string) {
+	for _, entry := range existing {
+		if containsLogin(users, entry) {
+			removed = append(removed, entry)
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	for _, user := range users {
+		if !containsLogin(existing, user) && !containsLogin(missing, user) {
+			missing = append(missing, user)
+		}
+	}
+	return kept, removed, missing
+}
+
+// subjectIs names users as the subject of "is" or "are": "alice is", "alice, bob are".
+func subjectIs(users []string) string {
+	if len(users) == 1 {
+		return users[0] + " is"
+	}
+	return strings.Join(users, ", ") + " are"
+}
+
 // appendUsers adds the names that aren't already on the Allowlist, comparing
 // ignoring case and keeping each existing name exactly as it is.
 func appendUsers(existing, users []string) (merged, added, already []string) {
 	merged = slices.Clone(existing)
 	for _, user := range users {
-		if slices.ContainsFunc(merged, func(u string) bool { return strings.EqualFold(u, user) }) {
+		if containsLogin(merged, user) {
 			already = append(already, user)
 			continue
 		}
@@ -99,6 +156,11 @@ func appendUsers(existing, users []string) (merged, added, already []string) {
 		added = append(added, user)
 	}
 	return merged, added, already
+}
+
+// containsLogin reports whether logins holds login, ignoring case as GitHub does.
+func containsLogin(logins []string, login string) bool {
+	return slices.ContainsFunc(logins, func(l string) bool { return strings.EqualFold(l, login) })
 }
 
 func printAddedUsers(env Env, users []string) {
