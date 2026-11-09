@@ -1,37 +1,123 @@
 package lightsoff
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
 )
 
-// addRepo opts a repository in by appending its table to config.toml. It only
-// edits config: it sends no commands and needs no secrets.
-func addRepo(repo string, env Env) error {
+// addRepo opts a repository in by appending its table to config.toml, with any
+// users named by --allow. It only edits config: it sends no commands and needs
+// no secrets.
+func addRepo(repo string, users []string, env Env) error {
+	if err := validateUserLogins(users); err != nil {
+		return err
+	}
 	c, err := readConfigText(env.ConfigDir)
 	if err != nil {
 		return err
 	}
 	if c.cfg.optedIn(repo) {
 		fmt.Fprintf(env.Stdout, "lights-off: %s is already opted in.\n", repo)
-		warnIfAllowlistEmpty(env, c.cfg.repos[repo].allowlist)
+		if len(users) == 0 {
+			warnIfAllowlistEmpty(env, c.cfg.repos[repo].allowlist)
+			return nil
+		}
+		merged, added, already := appendUsers(c.cfg.repos[repo].allowlist, users)
+		if len(added) > 0 {
+			edited, err := c.withAllowlist(repo, merged)
+			if err != nil {
+				return err
+			}
+			if err := c.writeChecked(edited); err != nil {
+				return err
+			}
+			printAddedUsers(env, added)
+		}
+		printAlreadyUsers(env, already)
+		warnIfAllowlistEmpty(env, merged)
 		return nil
 	}
 
-	edited := c.withRepo(repo)
-	// Every edit is checked with the same parser the next run will use, so a
-	// config lights-off wrote is one it can read back.
-	if _, line, err := parseConfig(edited); err != nil {
-		return fmt.Errorf("%s:%d: edited config.toml is invalid: %w", configPath(env.ConfigDir), line, err)
-	}
-	if err := c.write(edited); err != nil {
+	merged, added, already := appendUsers(nil, users)
+	edited := c.withRepo(repo, merged)
+	if err := c.writeChecked(edited); err != nil {
 		return err
 	}
 	fmt.Fprintf(env.Stdout, "lights-off: %s is opted in.\n", repo)
-	warnIfAllowlistEmpty(env, nil)
+	if len(merged) == 0 {
+		warnIfAllowlistEmpty(env, nil)
+		return nil
+	}
+	printAddedUsers(env, added)
+	printAlreadyUsers(env, already)
 	return nil
+}
+
+// addAllowlistUsers adds users to an opted-in repository's Allowlist. It only
+// edits config: it sends no commands and needs no secrets.
+func addAllowlistUsers(repo string, users []string, env Env) error {
+	if err := validateUserLogins(users); err != nil {
+		return err
+	}
+	c, err := readConfigText(env.ConfigDir)
+	if err != nil {
+		return err
+	}
+	if !c.cfg.optedIn(repo) {
+		return errors.New(notOptedInMessage(repo))
+	}
+	merged, added, already := appendUsers(c.cfg.repos[repo].allowlist, users)
+	if len(added) == 0 {
+		printAlreadyUsers(env, already)
+		return nil
+	}
+	edited, err := c.withAllowlist(repo, merged)
+	if err != nil {
+		return err
+	}
+	if err := c.writeChecked(edited); err != nil {
+		return err
+	}
+	printAddedUsers(env, added)
+	printAlreadyUsers(env, already)
+	return nil
+}
+
+// appendUsers adds the names that aren't already on the Allowlist, comparing
+// ignoring case and keeping each existing name exactly as it is.
+func appendUsers(existing, users []string) (merged, added, already []string) {
+	merged = slices.Clone(existing)
+	for _, user := range users {
+		if slices.ContainsFunc(merged, func(u string) bool { return strings.EqualFold(u, user) }) {
+			already = append(already, user)
+			continue
+		}
+		merged = append(merged, user)
+		added = append(added, user)
+	}
+	return merged, added, already
+}
+
+func printAddedUsers(env Env, users []string) {
+	if len(users) == 0 {
+		return
+	}
+	fmt.Fprintf(env.Stdout, "lights-off: added %s to the Allowlist.\n", strings.Join(users, ", "))
+}
+
+func printAlreadyUsers(env Env, users []string) {
+	for _, user := range users {
+		fmt.Fprintf(env.Stdout, "lights-off: %s is already on the Allowlist.\n", user)
+	}
+}
+
+// notOptedInMessage is the refusal for a repository that isn't a Target
+// Repository, with the command that would make it one.
+func notOptedInMessage(repo string) string {
+	return fmt.Sprintf("%s is not opted in. To opt it in, run:\n\n    lights-off repo add %s --allow=<your-github-username>", repo, repo)
 }
 
 // warnIfAllowlistEmpty explains what an empty Allowlist means for the next run.
