@@ -58,6 +58,14 @@ allowlist = ["alice", "bob"]   # whose ready-for-agent labels count
 
 Running `repo add --allow=carol` on a repository that is already opted in adds the users it names that are missing, so the command from a refusal is safe to re-run. An `--n` run picks up nothing until someone is on the Allowlist. `--ticket` still works with an empty Allowlist, after you confirm the override.
 
+To opt a Target Repository out, run:
+
+```sh
+lights-off repo remove owner/repo
+```
+
+There is no confirmation prompt. It deletes the repository's table and its `[repos."owner/repo".secrets]` table, leaves the rest of the file alone, and prints the removed lines so you can paste them back. If it declared a secret that no remaining Target Repository declares, the command names it: delete that value from `secrets.env` before the next run, or lights-off will refuse to start. The repository's cached checkout and run logs are left alone.
+
 The file stays the reference for hand-editing and for settings the CLI doesn't cover, such as `implementer_memory` and repository secrets:
 
 ```toml
