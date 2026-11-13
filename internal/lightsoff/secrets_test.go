@@ -312,7 +312,7 @@ func TestEnvFlagsAndOAuthPassthroughAreNeverUsed(t *testing.T) {
 			}
 		}
 	}
-	spec, err := os.ReadFile(filepath.Join(w.cacheDir, "kits", "dsh", "spec.yaml"))
+	spec, err := os.ReadFile(filepath.Join(w.cacheDir, "kits", "dsh", "dsh.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,25 +321,35 @@ func TestEnvFlagsAndOAuthPassthroughAreNeverUsed(t *testing.T) {
 	}
 }
 
-// sbx 0.51.0 made shell a v3 kit that a v2 kit can't extend, and it declares no
-// credentials, so the kit has to name its own image and github service.
-func TestKitStandsAloneOnASupportedBaseImage(t *testing.T) {
+// sbx 0.51.0 made shell a v3 kit. A v2 kit can't extend it, and on sbx 0.53.0
+// one naming shell's image fails to create, so the kit is a v3 mixin added to
+// shell. shell declares no credentials, so the kit brings its own github service.
+func TestKitIsAV3MixinForShell(t *testing.T) {
 	w := newWorld(t)
 	if code := w.run("owner/repo", "--ticket=42"); code != 0 {
 		t.Fatalf("exit code = %d\nstderr:\n%s", code, w.stderr.String())
 	}
 
-	raw, err := os.ReadFile(filepath.Join(w.cacheDir, "kits", "dsh", "spec.yaml"))
+	dir := filepath.Join(w.cacheDir, "kits", "dsh")
+	if _, err := os.Stat(filepath.Join(dir, "spec.yaml")); err == nil {
+		t.Errorf("kit still has a v2 spec.yaml")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "dsh.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	spec := string(raw)
-	if strings.Contains(spec, "\nextends:") {
-		t.Errorf("kit extends another kit")
-	}
-	for _, want := range []string{"image: docker.io/sbx/shell-image:", "service: github", "name: GH_TOKEN"} {
+	for _, want := range []string{
+		"# syntax=docker/sandbox-kit:3\n", "schemaVersion: \"3\"", "kind: mixin",
+		"service: deepseek", "service: github", "name: GH_TOKEN",
+	} {
 		if !strings.Contains(spec, want) {
 			t.Errorf("kit should contain %q", want)
+		}
+	}
+	for _, unwanted := range []string{"\nextends:", "\nsandbox:", "\n  image:", "scheme:"} {
+		if strings.Contains(spec, unwanted) {
+			t.Errorf("kit should not contain %q", unwanted)
 		}
 	}
 }

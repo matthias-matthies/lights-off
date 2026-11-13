@@ -1,0 +1,163 @@
+# syntax=docker/sandbox-kit:3
+#
+# A mixin for sbx's built-in shell workload:
+#   sbx create --clone --kit ./kits/dsh shell /path/to/repo
+#
+# sbx 0.51.0 made shell a v3 kit. A v2 kit can neither extend it nor, on sbx
+# 0.53.0, run as its own sandbox on the image behind it: create fails with
+# "failed to apply kit to sandbox". v3 has no v2 fallback, so this is a v3 mixin.
+schemaVersion: "3"
+kind: mixin
+displayName: DeepSeek Harness (headless)
+description: >-
+  DeepSeek Harness on Node 24, with the implement, pr, code-review and tdd
+  skills installed for unattended ticket work. DeepSeek credentials are
+  injected by the sbx proxy; the agent sees only the proxy-managed sentinel.
+version: "0.2.0"
+sourceUrl: https://github.com/matthias-matthies/lights-off
+provides: ["dsh@0.2.2-rc.1"]
+
+# Only the skills go into the image. They stay out of /home/agent here,
+# because a layer that creates /home/agent/.agents would also replace the
+# home directory's ownership; an install hook copies them in as the agent.
+build: |
+  FROM scratch
+  COPY files/home/.agents/skills /usr/share/lights-off/skills
+
+# Static values reach the container only through args with env. Each is
+# pinned by its enum, so an installer can't change it.
+args:
+  dshPermissionMode:
+    # The sandbox is already the isolation boundary. dsh's own nested bash
+    # sandbox would otherwise block writes outside the workspace and the
+    # "ask" approval policy would stall a headless run with no one to answer.
+    default: danger-full-access
+    enum: [danger-full-access]
+    env: DSH_PERMISSION_MODE
+  gitTerminalPrompt:
+    # Never let a missing terminal turn a git or gh prompt into a hang.
+    default: "0"
+    enum: ["0"]
+    env: GIT_TERMINAL_PROMPT
+  ghPromptDisabled:
+    default: "1"
+    enum: ["1"]
+    env: GH_PROMPT_DISABLED
+
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      install:
+        allow:
+          - nodejs.org
+          - registry.npmjs.org
+          - "*.npmjs.org"
+      runtime:
+        allow:
+          # Model inference and web search.
+          - api.deepseek.com
+          # Packages the Implementer may need.
+          - nodejs.org
+          - registry.npmjs.org
+          - "*.npmjs.org"
+          - "*.githubusercontent.com"
+          - api.github.com
+          - raw.githubusercontent.com
+          - github.com
+          - "*.github.com"
+          - ghcr.io
+          # Package updates on the Debian-based shell workload and Ubuntu images.
+          - "*.ubuntu.com"
+          - "*.debian.org"
+
+  - type: com.docker.sandbox/credential@1
+    description: DeepSeek API key for model inference, injected by the sbx proxy.
+    config:
+      service: deepseek
+      phase: runtime
+      apiKey:
+        name: DEEPSEEK_API_KEY
+        proxyManaged: true
+        # dsh calls DeepSeek's Anthropic-compatible Messages endpoint, so the
+        # key goes in x-api-key, not a bearer token.
+        inject:
+          - domain: api.deepseek.com
+            header: x-api-key
+            format: "%s"
+
+  # The shell kit declares no credentials. A token stored for one sandbox takes
+  # precedence, which is how each role gets its own. The kit limits it to these
+  # hosts, whatever else its binding approves. v3 has no scheme shorthand and
+  # no Basic auth, so github.com gets a bearer header, as in Docker's gh kit.
+  - type: com.docker.sandbox/credential@1
+    description: GitHub token for gh and git over HTTPS, injected by the sbx proxy.
+    config:
+      service: github
+      phase: runtime
+      apiKey:
+        name: GH_TOKEN
+        proxyManaged: true
+        inject:
+          - domain: api.github.com
+            header: Authorization
+            format: "Bearer %s"
+          - domain: github.com
+            header: Authorization
+            format: "Bearer %s"
+          - domain: raw.githubusercontent.com
+            header: Authorization
+            format: "Bearer %s"
+
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      install:
+        # The shell workload ships git, gh, jq and curl. Fail the create loudly
+        # if a future one stops doing so, rather than discovering it mid-run.
+        - description: Check the base image's tooling
+          user: "0"
+          command: |
+            set -eu
+            for c in git gh jq curl tar gzip; do
+              command -v "$c" >/dev/null 2>&1 || {
+                echo "dsh kit: required command missing from base image: $c" >&2
+                exit 1
+              }
+            done
+        # Node 24.9 or later is required. Pin one exact LTS release; arm64 and
+        # amd64 are both published.
+        - description: Install Node 24.22.2
+          user: "0"
+          command: |
+            set -eu
+            arch="$(uname -m)"
+            case "$arch" in
+              aarch64|arm64) node_arch=arm64 ;;
+              x86_64|amd64) node_arch=x64 ;;
+              *) echo "dsh kit: unsupported architecture: $arch" >&2; exit 1 ;;
+            esac
+            url="https://nodejs.org/dist/v24.22.2/node-v24.22.2-linux-${node_arch}.tar.gz"
+            curl -fsSL --retry 3 "$url" -o /tmp/node.tar.gz
+            tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1
+            rm -f /tmp/node.tar.gz
+            node --version
+        # Pin the dsh release. Its postinstall scripts are optional for the
+        # headless profile (verified in the spike); skipping them keeps the
+        # create from needing a compiler or a second network round trip.
+        - description: Install dsh 0.2.2-rc.1
+          user: "0"
+          command: |
+            set -eu
+            npm install -g --prefix /usr/local --ignore-scripts \
+              @deepseek-ai/dsh@0.2.2-rc.1
+            installed="$(dsh --version)"
+            [ "$installed" = "0.2.2-rc.1" ] || {
+              echo "dsh kit: expected dsh 0.2.2-rc.1, got $installed" >&2
+              exit 1
+            }
+        - description: Install the bundled skills
+          user: "1000"
+          command: |
+            set -eu
+            mkdir -p /home/agent/.agents/skills
+            cp -R /usr/share/lights-off/skills/. /home/agent/.agents/skills/
+            ls /home/agent/.agents/skills

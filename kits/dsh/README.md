@@ -1,35 +1,40 @@
 # dsh sandbox kit
 
-An `sbx` schema v2 sandbox kit for DeepSeek Harness (`dsh`) running headless in
-a sandbox. It is the kit the lights-off spike proved out; see
+An `sbx` schema v3 mixin for DeepSeek Harness (`dsh`) running headless in a
+sandbox, added to sbx's built-in `shell` workload. It is the kit the lights-off spike proved out; see
 [`docs/spikes/0001-dsh-unattended-in-sbx.md`](../../docs/spikes/0001-dsh-unattended-in-sbx.md)
 for the measurements and caveats.
 
 ## What it provides
 
-- the `docker.io/sbx/shell-image` base image (Ubuntu 26.04 when last checked),
-  extended with:
+- on top of the `shell` workload:
   - Node 24.22.2 from nodejs.org
   - `@deepseek-ai/dsh@0.2.2-rc.1`, installed with `--ignore-scripts` (headless
     work does not need the optional native postinstall scripts)
   - the `implement`, `pr`, `code-review` and `tdd` skills under
     `/home/agent/.agents/skills`
-- `DSH_PERMISSION_MODE=danger-full-access` so a headless run does not stall on
+- `DSH_PERMISSION_MODE=danger-full-access`, `GIT_TERMINAL_PROMPT=0` and
+  `GH_PROMPT_DISABLED=1` (args pinned by `enum`, since v3 sets environment
+  variables only through args) so a headless run does not stall on
   approval prompts. The sbx sandbox is the isolation boundary.
 - a proxy-managed `deepseek` service: the sandbox sees
   `DEEPSEEK_API_KEY=proxy-managed`, and sbx injects the real key into the
   `x-api-key` header on `api.deepseek.com`. dsh uses DeepSeek's
   Anthropic-compatible Messages endpoint, so this header is required.
-- a proxy-managed `github` service for `gh` and Git over HTTPS, injected on
-  `api.github.com`, `github.com` and `raw.githubusercontent.com`. The `shell`
-  kit no longer provides one, and a token stored for one sandbox overrides any
-  other.
+- a proxy-managed `github` service for `gh` and Git over HTTPS, injected as
+  `Authorization: Bearer` on `api.github.com`, `github.com`
+  and `raw.githubusercontent.com`. v3 kits have no `scheme`
+  shorthand, so Git over HTTPS no longer gets Basic auth with
+  `x-access-token`; Docker's own `gh` example kit uses a bearer header for
+  `github.com` too. The `shell` kit declares no credentials, and a token
+  stored for one sandbox overrides any other.
 - network allow rules for DeepSeek, Node/npm, GitHub and Ubuntu/Debian package
   hosts.
 
 ## Prerequisites
 
-1. `sbx` 0.51.0 or later, signed in. Target-Repository-specific secrets need its
+1. `sbx` 0.51.0 or later, signed in, and Docker Desktop for the first build
+   (see below). Target-Repository-specific secrets need its
    `secret set-custom --value-stdin`.
 2. A DeepSeek key.
 3. A credential binding in `~/.config/sbx/credentials.yaml`. Local kits need an
@@ -59,16 +64,28 @@ for the measurements and caveats.
 
 ## Build and use
 
-Validate without the daemon:
+`sbx` builds a v3 source kit with Docker Desktop's daemon and caches the
+result as `sbx-kit-src:dsh-<hash>`. Later creates use the cache without Docker
+Desktop. It builds again when the kit changes, and after 7 days without use,
+when sbx removes the cached build. Without Docker Desktop, such a create fails
+with `Cannot connect to the Docker daemon`.
+
+Validate (this builds too, so it needs Docker Desktop; `--offline` can't build
+v3 source kits):
 
 ```sh
-sbx kit validate --offline ./kits/dsh
+sbx kit validate ./kits/dsh
 ```
+
+The skills are copied into the image at `/usr/share/lights-off/skills` and an
+install hook copies them to `/home/agent/.agents/skills` as the agent user.
+They are not declared with `agent-skill@1`, which would also mount the host's
+shared skills store into an unattended sandbox.
 
 Create a sandbox on a private clone of a host Git repository:
 
 ```sh
-sbx create --clone --name my-dsh --memory 2g ./kits/dsh /path/to/repo
+sbx create --clone --name my-dsh --memory 2g --kit ./kits/dsh shell /path/to/repo
 ```
 
 Run one headless job. The kit already sets `DSH_PERMISSION_MODE`, but passing
@@ -113,4 +130,6 @@ after CI.
 |---|---|---|---|
 | macOS 27.2, Apple silicon | 0.50.1 | 0.2.2-rc.1 | Kit created, headless JSON task, `code-review` and `implement` all ran unattended |
 | macOS, Apple silicon, on `shell-image` | 0.51.0 | 0.2.2-rc.1 | Kit created; Node, dsh, gh and the `GH_TOKEN` placeholder present. No agent task or GitHub call run yet |
+| macOS, Apple silicon, v2 kit on `shell-image` | 0.53.0 | — | Fails: `failed to apply kit to sandbox` (seen with a kit of the same shape in another project). Fixed by the v3 mixin |
+| macOS, Apple silicon, v3 mixin on `shell` | 0.53.0 | 0.2.2-rc.1 | Not yet tested |
 | Ubuntu 24.04+ | — | — | Not yet tested; sbx documents Ubuntu as its Linux platform, not Debian |
