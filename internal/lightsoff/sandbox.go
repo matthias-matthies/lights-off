@@ -54,8 +54,11 @@ func sandboxName(repo string, ticket int, role string, iteration int, now time.T
 	return fmt.Sprintf("lo-%.30s-%d-%s-%d-%d", slug(name), ticket, role, iteration, now.Unix())
 }
 
+// create adds the dsh kit to sbx's built-in shell workload. The kit is a v3
+// mixin, because sbx 0.51.0 made shell a v3 kit and v2 kits stopped working
+// with it.
 func (s sandboxes) create(name, memory string) error {
-	_, err := s.run("sbx", "create", "--clone", "--name", name, "--memory", memory, s.kit, s.workspace)
+	_, err := s.run("sbx", "create", "--clone", "--name", name, "--memory", memory, "--kit", s.kit, "shell", s.workspace)
 	return err
 }
 

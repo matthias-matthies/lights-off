@@ -607,10 +607,15 @@ func (w *world) sbx(c lightsoff.Command) lightsoff.Result {
 			w.createFails--
 			return lightsoff.Result{Stderr: "error: failed to apply kit to sandbox", ExitCode: 1}
 		}
-		// The agent is sbx's built-in claude or a local kit.
-		kit := args[len(args)-2]
-		if _, err := os.Stat(filepath.Join(kit, "spec.yaml")); kit != "claude" && err != nil {
-			w.t.Errorf("kit %q has no spec.yaml: %v", kit, err)
+		// The agent is sbx's built-in claude, or shell with a local kit added.
+		switch agent, kit := args[len(args)-2], flagValue(args, "--kit"); {
+		case agent == "claude" && kit == "":
+		case agent == "shell" && kit != "":
+			if _, err := os.Stat(filepath.Join(kit, "dsh.yaml")); err != nil {
+				w.t.Errorf("kit %q has no dsh.yaml: %v", kit, err)
+			}
+		default:
+			w.t.Errorf("sbx create with agent %q and kit %q", agent, kit)
 		}
 		if len(w.sandboxes) == 0 {
 			// Without a binding the real sbx withholds the credential.

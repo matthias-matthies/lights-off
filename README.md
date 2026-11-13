@@ -12,6 +12,7 @@ Agents never get read access to your secrets. Credentials reach a sandbox only t
 
 - macOS 14+ on Apple silicon
 - [`sbx`](https://github.com/docker/sbx-releases) 0.51.0 or later, plus `gh` and `git`
+- Docker Desktop running the first time lights-off creates a sandbox, and again after a lights-off upgrade changes the kit or after 7 days without a run. `sbx` builds the dsh kit with it and caches the result; see [`kits/dsh/README.md`](kits/dsh/README.md#build-and-use).
 
 ## Install
 
